@@ -251,6 +251,19 @@ fn windows_handle_information(file: &std::fs::File) -> Option<(u32, u32)> {
 }
 
 #[cfg(windows)]
+pub(crate) fn windows_file_identity(file: &std::fs::File) -> Option<(u32, u32, u64)> {
+    use std::os::windows::io::AsRawHandle;
+    let mut information = WindowsByHandleFileInformation::default();
+    // SAFETY: file owns the live handle and information has the Win32 layout.
+    let ok = unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut information) };
+    (ok != 0).then_some((
+        information.attributes,
+        information.volume_serial,
+        (u64::from(information.index_high) << 32) | u64::from(information.index_low),
+    ))
+}
+
+#[cfg(windows)]
 fn windows_final_handle_path(file: &std::fs::File) -> Option<PathBuf> {
     use std::os::windows::ffi::OsStringExt;
     use std::os::windows::io::AsRawHandle;
