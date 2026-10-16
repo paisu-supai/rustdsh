@@ -15,6 +15,7 @@ export async function oauthFixture() {
     wrongIssuer: false,
     wrongResource: false,
     redirectToken: false,
+    redirect: null,
     invalidRefresh: false,
     tokenExtraScope: false,
     omitScope: false,
@@ -35,6 +36,10 @@ export async function oauthFixture() {
       res.end(JSON.stringify(data));
     };
     const url = new URL(req.url, base);
+    if (url.pathname === state.redirect?.path) {
+      res.writeHead(state.redirect.status, { location: state.redirect.location });
+      return res.end();
+    }
     if (
       url.pathname === "/.well-known/oauth-protected-resource/mcp" ||
       url.pathname === "/.well-known/oauth-protected-resource"

@@ -160,6 +160,86 @@ test("untrusted metadata, issuer echo, and token redirects are refused without c
     false,
   );
 });
+test("audited SDK keeps every OAuth and transport redirect refused without forwarding secrets", async (t) => {
+  for (const status of [301, 302, 303, 307, 308])
+    for (const operation of ["registration", "exchange", "refresh", "transport"])
+      for (const foreign of [false, true])
+        await t.test(
+          `${operation} ${status} ${foreign ? "foreign" : "same"} origin`,
+          async (t) => {
+            const f = await setup(t),
+              sink = await oauthFixture();
+            t.after(() => sink.close());
+            const manager = f.make(
+              operation === "registration"
+                ? { ...f.config(), clientId: undefined, dynamicRegistration: true }
+                : f.config(),
+            );
+            let callback;
+            if (operation === "exchange")
+              callback = f.callback((await manager.beginLogin()).authorizationUrl);
+            if (operation === "refresh" || operation === "transport")
+              await f.login(manager);
+            if (operation === "refresh") f.advance(61000);
+            f.state.redirect = {
+              path:
+                operation === "registration"
+                  ? "/register"
+                  : operation === "transport"
+                    ? "/mcp"
+                    : "/token",
+              status,
+              location:
+                (foreign ? sink.base : f.base) + "/leak?token=FAKE_REDIRECT_SECRET",
+            };
+            const requestCount = f.state.requests.length;
+            await assert.rejects(
+              async () => {
+                if (operation === "registration") await manager.beginLogin();
+                else if (operation === "exchange")
+                  await manager.finishLogin(callback);
+                else if (operation === "refresh") await manager.token();
+                else {
+                  const client = new runtime.sdk.Client({
+                    name: "redirect-fixture",
+                    version: "1",
+                  });
+                  t.after(() => client.close());
+                  await client.connect(
+                    new runtime.sdk.StreamableHTTPClientTransport(
+                      new URL(f.config().url),
+                      manager.transportOptions(),
+                    ),
+                  );
+                }
+              },
+              (error) => {
+                assert.match(error.message, /operation_failed/);
+                assert.doesNotMatch(error.message, /FAKE_/);
+                return true;
+              },
+            );
+            const redirected = f.state.requests
+              .slice(requestCount)
+              .filter((r) => r.path === f.state.redirect.path && r.method === "POST");
+            assert.ok(redirected.length > 0, "redirecting POST must be reached");
+            if (operation === "exchange" || operation === "refresh")
+              assert.equal(
+                new URLSearchParams(redirected[0].body).get("grant_type"),
+                operation === "exchange" ? "authorization_code" : "refresh_token",
+              );
+            if (operation === "transport") {
+              assert.equal(JSON.parse(redirected[0].body).method, "initialize");
+              assert.match(redirected[0].headers.authorization, /^Bearer FAKE_ACCESS/);
+            }
+            assert.equal(sink.state.requests.length, 0);
+            assert.equal(
+              f.state.requests.some((r) => r.path.startsWith("/leak")),
+              false,
+            );
+          },
+        );
+});
 test("a stored grant cannot refresh through an MCP-selected replacement issuer", async (t) => {
   const f = await setup(t);
   await f.credentials.set("MCP_BINDING_SECRET", "FAKE_BINDING_SECRET");
