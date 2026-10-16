@@ -21,8 +21,8 @@ jobs:
         shell: bash
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
-      CATALOG_BASE: 48536889e52d601d8218a5e26e6e28bf510efa88
-      CATALOG_SOURCE: ffd23786c0eff9f2d64202a0bc17cde5f15921cf
+      CATALOG_BASE: d871ea2a1f1e8ce48358f5639445d41e334b8d11
+      CATALOG_SOURCE: c1ba95a704ce77582b96ce2ddc3e9425a746a09c
       GIT_CONFIG_COUNT: 3
       GIT_CONFIG_KEY_0: fetch.prune
       GIT_CONFIG_VALUE_0: 'false'
@@ -44,7 +44,7 @@ jobs:
       - name: Verify canonical catalog blobs and create complete original checkout
         run: |
           set -euo pipefail
-          git diff --exit-code "$CATALOG_SOURCE" -- dashboard/adapter-catalog-native.mjs dashboard/adapter-catalog.mjs dashboard/adapters.mjs dashboard/cli.mjs dashboard/test/adapter-catalog-cli.test.mjs dashboard/test/adapter-catalog-native.test.mjs dashboard/test/adapter-catalog-peer.rs docs/adapter-catalog-native.md src/adapter_catalog.rs src/main.rs tests/adapter_catalog_cli.rs
+          git diff --exit-code "$CATALOG_SOURCE" -- dashboard/adapter-catalog-native.mjs dashboard/adapter-catalog.mjs dashboard/adapters.mjs dashboard/cli.mjs dashboard/test/adapters.test.mjs dashboard/test/adapter-catalog-cli.test.mjs dashboard/test/adapter-catalog-native.test.mjs dashboard/test/adapter-catalog-peer.rs docs/adapter-catalog-native.md src/adapter_catalog.rs src/main.rs tests/adapter_catalog_cli.rs
           git worktree add --detach "$RUNNER_TEMP/rdsh-catalog-original" "$CATALOG_BASE"
           echo "CATALOG_ORIGINAL=$RUNNER_TEMP/rdsh-catalog-original" >> "$GITHUB_ENV"
           mkdir catalog-evidence
@@ -69,7 +69,7 @@ jobs:
       - name: Exercise actual full CLI and dedicated host, including real deadlines
         run: |
           set -euo pipefail
-          node --test dashboard/test/adapter-catalog-cli.test.mjs dashboard/test/adapter-catalog-native.test.mjs 2>&1 | tee catalog-evidence/node-tests.log
+          node --test dashboard/test/adapter-catalog-cli.test.mjs dashboard/test/adapter-catalog-native.test.mjs dashboard/test/cli-locale.test.mjs 2>&1 | tee catalog-evidence/node-tests.log
       - name: Measure legacy CLI, native direct and qualified bridge on equal conditions
         run: |
           set -euo pipefail
