@@ -8,6 +8,8 @@
 # --check-only to preview without installing.
 # rdsh self-update prefers a prebuilt release binary; source builds run only with
 # RDSH_SYNC_FROM_SOURCE=1 (under nice/ionice). Regress always runs sandboxed.
+# The run ends by refreshing the provider model catalogs (step 7); set
+# RDSH_MODELS_SYNC=0 to skip that step, and its failure never fails the run.
 # Release integrity: the archive must match the digest pinned in the repository
 # release-digests.tsv (canonical origin), never an <asset>.sha256 from the base.
 set -u
@@ -480,5 +482,21 @@ else
     fi
     rm -f "$NEWBIN"
   fi
+fi
+# Model catalogs follow the same daily run: a model released after the build
+# reaches the picker without editing rdsh.json by hand. `rdsh features off
+# models_sync` or RDSH_MODELS_SYNC=0 for one run turns it off. Nothing here may
+# write during --check-only or fail the run, so every path logs one line and
+# continues.
+if [ "${RDSH_MODELS_SYNC:-1}" = 0 ]; then
+  log "models sync skipped (RDSH_MODELS_SYNC=0)"
+elif [ ! -x "$PREFIX_BIN/rdsh" ]; then
+  log "models sync skipped (no executable at $PREFIX_BIN/rdsh)"
+elif [ "$CHECK_ONLY" = 1 ]; then
+  log "models sync skipped (--check-only)"
+elif "$PREFIX_BIN/rdsh" models sync --auto >> "$LOGDIR/sync.log" 2>&1; then
+  log "models sync done"
+else
+  log "models sync failed; model catalogs left as is"
 fi
 log "done"

@@ -28,8 +28,8 @@ Desktopでは`rdsh desktop install --package /絶対パス/plugins/rdsh-translat
 
 表示文言とコマンド説明・エラー文は表示言語に追従します。Web UIはDSHのlocaleカタログ
 （`rdsh-translation`名前空間のen/zh/ja辞書）を使い、日本語の言語定義はrdsh-settingsが
-所有するためこのプラグインからは言語を追加しません。ホスト側の文言は`rdsh.json`の
-`general.language`、`RDSH_LANG`、OSロケールの順に解決します。プラグイン一覧の
+所有するためこのプラグインからは言語を追加しません。ホスト側の文言は`RDSH_LANG`、
+`rdsh.json`の`general.language`、OSロケールの順に解決します。プラグイン一覧の
 タイトル・説明は`locale/en.json`・`locale/ja.json`・`locale/zh.json`を使用します。
 
 コードブロック、インラインコード、識別子・パス等は保護トークンで保持します。

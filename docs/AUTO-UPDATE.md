@@ -76,6 +76,25 @@ The command then reports `"systemctl": "skipped"` and the operator schedules
 the script however that host wants. The same switch keeps the tests away from
 the test runner's own systemd instance.
 
+## Model catalogs
+
+The daily run refreshes the provider model catalogs too. Its last step is
+`rdsh models sync --auto`, which appends the models a provider advertises but
+the profile lacks (and renames stale entries) exactly like a manual
+`rdsh models sync`. `--auto` is the timer's mode: a catalog it cannot reach is
+logged as a failure and the step still returns success, because a release
+update must not stop with the catalog refresh.
+
+Two switches stop it:
+
+- `rdsh features off models_sync` (the switch defaults to on, and
+  `rdsh features on models_sync` brings it back) for every run.
+- `RDSH_MODELS_SYNC=0` in the environment of one run, for an operator who wants
+  the release update without the catalog refresh.
+
+`--check-only` never reaches the step, and neither does a missing
+`$PREFIX_BIN/rdsh`: both are logged and the profiles are left untouched.
+
 ## What it does not do
 
 - It does not update anything itself: the daily run is `sync-dsh.sh`, with the

@@ -492,6 +492,11 @@ enum ModelsAction {
         /// Print what would change without writing the profile
         #[arg(long = "dry-run")]
         dry_run: bool,
+        /// Non-interactive run for the daily auto-update timer: a no-op that
+        /// exits 0 when `features.models_sync` is off, and never a failing
+        /// status
+        #[arg(long = "auto")]
+        auto: bool,
         #[arg(long = "json")]
         json: bool,
     },
@@ -1465,11 +1470,13 @@ fn main() {
                 profile,
                 provider: sync_provider,
                 dry_run,
+                auto,
                 json: sync_json,
             }) => models::cmd_models_sync(
                 profile.or(cli.profile).as_deref(),
                 sync_provider.or(provider).as_deref(),
                 dry_run || dry,
+                auto,
                 sync_json || json,
             ),
         },
@@ -2211,6 +2218,10 @@ fn localized_arg_help(id: &str, locale: locale::Locale) -> Option<&'static str> 
         ),
         "passthrough" => ("关闭 slim 委托", "slim委譲を無効化"),
         "dry_run" => ("只显示将要执行的操作", "実行せずに内容を表示"),
+        "auto" => (
+            "每日自动更新定时器使用；功能开关关闭时不执行任何操作并以 0 退出",
+            "毎日の自動更新タイマー用。機能スイッチが無効なら何もせず0で終了",
+        ),
         "slim" => ("强制 slim 委托", "slim委譲を強制"),
         "no_slim" => ("关闭 slim 委托", "slim委譲を無効化"),
         "patch" => (

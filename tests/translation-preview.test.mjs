@@ -215,13 +215,19 @@ test('translation preview: route prefers the request header and falls back only 
 
 test('translation preview: config authentication precedes method and file access; HEAD has no body', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'rdsh-translation-')); const previous = process.env.DSH_HOME; process.env.DSH_HOME = dir;
-  t.after(async () => { if (previous === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = previous; await rm(dir, { recursive: true, force: true }); });
+  // Pin the language so the message assertion does not depend on the host locale.
+  const previousLang = process.env.RDSH_LANG; process.env.RDSH_LANG = 'en';
+  t.after(async () => { if (previous === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = previous; if (previousLang === undefined) delete process.env.RDSH_LANG; else process.env.RDSH_LANG = previousLang; await rm(dir, { recursive: true, force: true }); });
   let handler; const ctx = { webServer: { register(route) { handler = route.handler; return () => {}; } }, connection: { requestRejection: (req) => req.rejection } };
   registerConfigApi(ctx);
   async function request(method, rejection) { let status, output, headers; await handler({ method, rejection }, { writeHead(value, fields) { status = value; headers = fields; }, end(value) { output = value; } }); return { status, output: output ? JSON.parse(output) : undefined, headers }; }
   await writeFile(join(dir, 'rdsh.json'), '{broken');
   for (const code of [401, 403]) assert.equal((await request('POST', code)).status, code);
-  assert.equal((await request('POST')).status, 405); assert.equal((await request('GET')).status, 400);
+  assert.equal((await request('POST')).status, 405);
+  const broken = await request('GET');
+  assert.equal(broken.status, 400);
+  // 壊れた JSON は「形式が不正」。以前は「読み込めません」と誤報していた。
+  assert.equal(broken.output.error, 'The rdsh.json format is invalid');
   await writeFile(join(dir, 'rdsh.json'), JSON.stringify({ translation: { kana_threshold: 0.2 }, secret_field: 'not-returned' }));
   assert.deepEqual((await request('GET')).output, { ok: true, kana_threshold: 0.2 }); assert.equal((await request('HEAD')).output, undefined);
   ctx.connection = undefined; assert.equal((await request('GET')).status, 503);

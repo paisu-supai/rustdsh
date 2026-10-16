@@ -56,6 +56,9 @@ export async function readSettings(language = translationLanguage()) {
   } catch (error) {
     if (error.code === 'ENOENT') return { kanaThreshold: normalizeKanaThreshold() };
     if (error instanceof PreviewError) throw error;
+    // 構文エラーは「読めなかった」ではなく「形式が不正」。専用の文言が
+    // 用意されているのに到達できていなかった。
+    if (error instanceof SyntaxError) reject(language, 'settings.malformed');
     reject(language, 'settings.unreadable');
   }
 }

@@ -92,6 +92,7 @@ rdsh context status   # 有効化後に記憶の状態を見る
 | serve | off | ローカル閲覧画面（rdsh serve） |
 | search-web | off | SearXNG 経由の Web 検索 |
 | context_engine | off | 実験的なコンテキストエンジン |
+| models_sync | on | 毎日の自動更新でプロバイダのモデルカタログも更新する（`RDSH_MODELS_SYNC=0` で1回だけスキップ） |
 | compute | off | 常駐 pure-compute worker 連携（RDSH_COMPUTE=1） |
 | budget_guard | on | 予算ガードフック |
 | answer_guard | on | 本文が空（reasoning のみ）でターンが閉じるとき、再出力を1回だけ促す |

@@ -5,6 +5,39 @@ Format follows Keep a Changelog, versioning follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-16
+
+### Added
+
+- The daily auto-update run refreshes the provider model catalogs: `sync-dsh.sh`
+  ends with `rdsh models sync --auto`, which appends the models a provider
+  advertises that the profiles lack and reports a catalog it could not reach
+  without failing the run. `rdsh features off models_sync` (the default is on)
+  or `RDSH_MODELS_SYNC=0` for one run turns the step off; see
+  [docs/AUTO-UPDATE.md](docs/AUTO-UPDATE.md) (#692).
+
+### Fixed
+
+- The translation plugin classifies a malformed `rdsh.json` as
+  `settings.malformed` ("format is invalid") instead of the unreadable-settings
+  message, and `ci.yml` runs the `translation-core` and
+  `translation-client-crlf` suites so a regression fails CI (#691).
+
+- The links job parses `.lychee.toml` again: lychee 0.24.2 rejects the unknown
+  `headers` key, so the crates.io crate pages are excluded by pattern instead
+  (#689).
+
+### Changed
+
+- Dependency updates: `sha2` 0.11.1, `@modelcontextprotocol/client` 2.3.1 in
+  `plugins/rdsh-mcp-oauth`, `dependabot/fetch-metadata` 3 and
+  `pnpm/action-setup` 6 (#685, #686, #687, #688).
+
+- `release-digests.tsv` and `release-digests-windows.tsv` pin the published
+  v0.5.0 archives and move the `latest` row to v0.5.0, so `install.sh
+  --from-release` and the automatic updater install the release GitHub marks
+  Latest (#690).
+
 ## [0.5.0] - 2026-10-16
 
 ### Security

@@ -126,6 +126,11 @@ pub const FEATURES: &[FeatureDef] = &[
         summary: "static code-dependency graph and change impact (rdsh deps)",
     },
     FeatureDef {
+        id: "models_sync",
+        default: true,
+        summary: "refresh provider model catalogs from the daily auto-update run",
+    },
+    FeatureDef {
         id: "compute",
         default: false,
         summary: "allow the resident compute bridge (RDSH_COMPUTE=1)",
