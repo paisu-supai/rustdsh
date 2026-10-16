@@ -19,7 +19,6 @@ import {
   rollbackProjectMove,
 } from "./project-identity.mjs";
 import { readLocalRuntime } from "./private-runtime.mjs";
-import { startDashboard } from "./server.mjs";
 import { runStdio } from "./mcp.mjs";
 import { createCliAdapter } from "./adapters.mjs";
 import { runNativeAdapterCatalog } from "./adapter-catalog-native.mjs";
@@ -2234,6 +2233,7 @@ try {
     ).size;
     if (distinctProjectCount !== projectCount)
       throw new CliDiagnosticError("error.includeProjectDistinct");
+    const { startDashboard } = await import("./server.mjs");
     const dashboard = await startDashboard({
       language,
       kind: command,
