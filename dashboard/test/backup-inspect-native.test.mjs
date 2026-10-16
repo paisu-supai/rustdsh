@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { compileInspectPeer } from "./backup-inspect-peer-helper.mjs";
 import { backupHash } from "../history-backup.mjs";
 import { readBackupJson, backupInspection } from "../backup-files.mjs";
 
@@ -170,14 +171,31 @@ test("regular file/hardlink/parent link and localized errors; isolated native do
 test("actual adapter forwards native output/status and fails closed on spawn failure",async t=>{
   const root=await scratch(t),file=path.join(root,"archive.json");await fs.writeFile(file,JSON.stringify(baseline));
   const module=new URL("../backup-inspect-native.mjs",import.meta.url).href;
-  const invoke=(exe,timeout=10000)=>spawnSync(process.execPath,["--input-type=module","-e",`import {runNativeBackupInspect} from ${JSON.stringify(module)};try{process.exitCode=await runNativeBackupInspect(${JSON.stringify(exe)},${JSON.stringify(file)},"en")}catch(e){console.error(e.code||e.message);process.exitCode=1}`],{cwd:root,encoding:"utf8",timeout,env:{...process.env,DSH_HOME:root}});
+  const invoke=(exe,{mode="actual",timeout=10000,archive=file}={})=>{
+    const r=spawnSync(process.execPath,["--input-type=module","-e",`import {runNativeBackupInspect} from ${JSON.stringify(module)};try{process.exitCode=await runNativeBackupInspect(${JSON.stringify(exe)},${JSON.stringify(archive)},"en")}catch(e){console.error(e.code||e.message);process.exitCode=1}`],{cwd:root,encoding:"utf8",timeout,env:{...process.env,DSH_HOME:root,RDSH_INSPECT_PEER_MODE:mode,RDSH_INSPECT_PEER_MARKER:path.join(root,`marker-${mode}`),RDSH_INSPECT_PEER_HOME_RECORD:path.join(root,"probe-home")}});
+    assert.ifError(r.error);return r;
+  };
+  await fs.writeFile(path.join(root,"rdsh.json"),"broken caller settings");
   const direct=native(file,root),adapted=invoke(binary);
-  assert.equal(adapted.status,0,adapted.stderr);assert.equal(adapted.stdout,direct.stdout);
+  assert.equal(adapted.status,0,adapted.stderr);assert.equal(adapted.stdout,direct.stdout);assert.equal(adapted.stderr,"");
   const missing=invoke(path.join(root,"missing-native.exe"));assert.equal(missing.status,1);assert.equal(missing.stdout,"");assert.match(missing.stderr,/ENOENT/);
-  await fs.writeFile(path.join(root,"backup-inspect"),"process.exit(7)\n");
-  const failed=invoke(process.execPath);assert.equal(failed.status,7);assert.equal(failed.stdout,"");
-  await fs.writeFile(path.join(root,"backup-inspect"),"process.kill(process.pid,'SIGTERM')\n");
-  const signal=invoke(process.execPath);assert.equal(signal.status,1,signal.stderr);assert.equal(signal.stdout,"");
-  await fs.writeFile(path.join(root,"backup-inspect"),"setInterval(()=>{},1000)\n");
-  const timeout=invoke(process.execPath,40000);assert.equal(timeout.status,1);assert.equal(timeout.stdout,"");assert.match(timeout.stderr,/Native backup inspection timed out/);
+  const peer=compileInspectPeer(root);
+  const dirty=invoke(peer,{mode:"dirty-home"});
+  assert.equal(dirty.status,1);assert.equal(dirty.stdout,"");assert.match(dirty.stderr,/ENOTEMPTY|EEXIST/);
+  const probeHome=await fs.readFile(path.join(root,"probe-home"),"utf8");assert.ok(path.isAbsolute(probeHome));
+  assert.equal(await fs.readFile(path.join(probeHome,"unexpected"),"utf8"),"preserve");
+  await assert.rejects(fs.access(path.join(root,"marker-dirty-home")),{code:"ENOENT"});
+  for(const mode of ["legacy","bad-stderr","bad-exit","overflow","help-signal"]){
+    const r=invoke(peer,{mode,archive:path.join(root,"absent-archive.json")});
+    assert.equal(r.status,1,r.stderr);assert.equal(r.stdout,"");assert.match(r.stderr,/unavailable|exceeds 64 KiB/);
+    await assert.rejects(fs.access(path.join(root,`marker-${mode}`)),{code:"ENOENT"});
+  }
+  for(const [mode,code] of [["exit7",7],["signal",1]]){
+    const r=invoke(peer,{mode});assert.equal(r.status,code,r.stderr);assert.equal(r.stdout,"");
+    assert.match(await fs.readFile(path.join(root,`marker-${mode}`),"utf8"),/^operation:backup-inspect /);
+  }
+  const start=performance.now(),timeout=invoke(peer,{mode:"timeout",timeout:40000});
+  assert.equal(timeout.status,1);assert.equal(timeout.stdout,"");assert.match(timeout.stderr,/Native backup inspection timed out/);
+  assert.ok(performance.now()-start<34000,"help delay and operation must share the same 30-second deadline");
+  assert.match(await fs.readFile(path.join(root,"marker-timeout"),"utf8"),/^operation:backup-inspect /);
 });
