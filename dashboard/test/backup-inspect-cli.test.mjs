@@ -7,6 +7,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import {fileURLToPath} from "node:url";
 import {spawnSync} from "node:child_process";
+import {compileInspectPeer} from "./backup-inspect-peer-helper.mjs";
 import {backupInspection} from "../backup-files.mjs";
 const repo=fileURLToPath(new URL("../../",import.meta.url));
 const cli=fileURLToPath(new URL("../cli.mjs",import.meta.url));
@@ -99,12 +100,23 @@ test("actual CLI fails closed for missing native, nonzero exit, signal and timeo
  const {root,file}=await setup();const args=["backup","inspect","--archive-file",file];
  fail(run(root,args,{RDSH_BIN:"relative"}),/RDSH_BIN must be an absolute path/);
  fail(run(root,args,{RDSH_BIN:path.join(root,"missing-native")}),/ENOENT/);
- // Owned executable fixture, no loader/SDK/guard injection. A valid archive
- // would succeed if the adapter secretly re-executed the old JS path.
- const program=path.join(root,"backup-inspect");
- for(const [body,code] of [["process.exit(7)",7],["process.kill(process.pid,'SIGTERM')",1]]){
-  await fs.writeFile(program,body);const r=run(root,args,{RDSH_BIN:process.execPath});assert.equal(r.status,code,r.stderr);assert.equal(r.stdout,"");
+ // Test-only native peer is deliberately named dsh; argv0 must still be rdsh.
+ const peer=compileInspectPeer(root);
+ const env=mode=>({RDSH_BIN:peer,RDSH_INSPECT_PEER_MODE:mode,RDSH_INSPECT_PEER_MARKER:path.join(root,`marker-${mode}`),RDSH_INSPECT_PEER_HOME_RECORD:path.join(root,"probe-home")});
+ fail(run(root,args,env("dirty-home")),/ENOTEMPTY|EEXIST/);
+ const probeHome=await fs.readFile(path.join(root,"probe-home"),"utf8");assert.ok(path.isAbsolute(probeHome));
+ assert.equal(await fs.readFile(path.join(probeHome,"unexpected"),"utf8"),"preserve");
+ await assert.rejects(fs.access(path.join(root,"marker-dirty-home")),{code:"ENOENT"});
+ for(const mode of ["legacy","bad-stderr","bad-exit","overflow","help-signal"]){
+  fail(run(root,["backup","inspect","--archive-file",path.join(root,"absent-archive.json")],env(mode)),/unavailable|exceeds 64 KiB/);
+  await assert.rejects(fs.access(path.join(root,`marker-${mode}`)),{code:"ENOENT"});
  }
- await fs.writeFile(program,"setInterval(()=>{},1000)");
- fail(run(root,args,{RDSH_BIN:process.execPath},40000),/Native backup inspection timed out/);
+ for(const [mode,code] of [["exit7",7],["signal",1]]){
+  const r=run(root,args,env(mode));assert.equal(r.status,code,r.stderr);assert.equal(r.stdout,"");
+  assert.match(await fs.readFile(path.join(root,`marker-${mode}`),"utf8"),/^operation:backup-inspect /);
+ }
+ const start=performance.now();
+ fail(run(root,args,env("timeout"),40000),/Native backup inspection timed out/);
+ assert.ok(performance.now()-start<34000,"help delay must consume the operation's original 30-second deadline");
+ assert.match(await fs.readFile(path.join(root,"marker-timeout"),"utf8"),/^operation:backup-inspect /);
 });

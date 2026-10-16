@@ -10,9 +10,20 @@
 rdsh backup-inspect --archive-file=<file>
 ```
 
+archive引数を送る前に、adapterは解決済みpeerへ `--language=en --help` を送り、
+root helpのCommands節に完全名 `backup-inspect` があることを確認する。notes/after-helpの
+単なる言及は資格にならない。probe/operationともargv0は `rdsh` に固定し、実行ファイル名が
+`dsh` の場合も旧SDK/profile launcherへ誤委譲しないようにする。
+probeだけは一時的なowned空DSH_HOMEと英語・無色設定を用い、stdout/stderr合計64 KiB以内、
+exit0・signalなし・stderr空を要求する。probe後はその空directoryだけをrmdirする。
+予期しない生成物があれば再帰削除せず保持し、archiveを送らず失敗する。
+operationは元のDSH_HOMEと選択言語を使い、stdioを継承する。
+既存CLIのsettings/locale検証順序やRustのhelp/settings契約は変更しない。
+
 ファイル読取、UTF-8/JSON処理、schema/content/reference/integrity検証、inspection投影、
-JSON出力はRust側だけで行う。JS側はarchiveを再読込・再検証しない。
-spawn失敗、非zero終了、signal、30秒deadlineに対するJS fallbackはない。
+JSON出力はRust側だけで行う。Node側はarchiveファイル/JSONを読まない。
+probe開始からoperation終了まで単一の30秒deadlineを共有する。probe失敗・出力超過・
+spawn失敗、非zero終了、signal、timeoutに対するretry/JS fallbackはない。
 非zero終了コードは転送し、signalはexit 1、timeoutはowned childを停止して失敗とする。
 `export`、`restore`等の別経路が使用する既存JS validator/readerは削除しない。
 
@@ -72,7 +83,9 @@ Node-less試験はPATHを空にし、ownedな壊れたsettingsを置いて直接
 readerのsnapshot→open間の置換拒否、open後のpath置換に対する同一handle読取、
 metadata確認後の成長に対するbounded readは、ownedなfixtureを用いた決定的なunit testで確認する。
 Windows leaf file symlink、Unix FIFO、権限拒否、同時並行writerによるraceの実機再現は、
-このWindowsローカル試験の成功だけでは立証しない。Unix FIFO testはUnix CIで実行する。
+このWindowsローカル試験の成功だけでは立証しない。Windows leaf symlinkの作成が
+EPERM等でできない場合も未実測のままであり、成功扱いや権限変更をしない。
+Unix FIFO testはUnix CIで実行する。
 任意binary64の全組合せ・全WHATWG URL実装差の
 網羅性も主張しない。CIおよび独立reviewでこれらとwhole CLIの結果を別に確認する。
 この文書はruntime境界の説明であり、#453/#516全体の完了、product Ready/GOの宣言ではない。
