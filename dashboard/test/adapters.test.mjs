@@ -445,8 +445,17 @@ test("public CLI exposes catalog/probe/smoke and requires an explicit original e
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "rdsh-adapter-cli-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const cli = fileURLToPath(new URL("../cli.mjs", import.meta.url));
+  const binary = path.resolve(fileURLToPath(new URL("../../", import.meta.url)),
+    process.env.RDSH_BIN || process.env.BIN || path.join("target/debug", process.platform === "win32" ? "rdsh.exe" : "rdsh"));
   const catalog = JSON.parse(
-    (await run(process.execPath, [cli, "adapters"])).stdout,
+    (await run(process.execPath, [cli, "adapters"], {
+      env: {
+        ...process.env, RDSH_BIN: binary, DSH_HOME: root, HOME: root, USERPROFILE: root,
+        APPDATA: root, LOCALAPPDATA: root, XDG_CONFIG_HOME: root, XDG_DATA_HOME: root,
+        RDSH_AUTH_AUTOSYNC: "0", RDSH_ORIG_BIN: path.join(root, "missing-original"),
+        DSH_ORIG_BIN: path.join(root, "missing-original"),
+      },
+    })).stdout,
   );
   assert.equal(catalog.adapters.length, 4);
   await assert.rejects(
