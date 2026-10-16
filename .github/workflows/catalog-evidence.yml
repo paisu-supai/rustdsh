@@ -21,8 +21,8 @@ jobs:
         shell: bash
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
-      CATALOG_BASE: d871ea2a1f1e8ce48358f5639445d41e334b8d11
-      CATALOG_SOURCE: c1ba95a704ce77582b96ce2ddc3e9425a746a09c
+      CATALOG_BASE: 6a294073ab0061ed9c29f0b9620d6dbc6fc10310
+      CATALOG_SOURCE: 2480fba093367bb6b698c33a1a4c2d7963937c1f
       GIT_CONFIG_COUNT: 3
       GIT_CONFIG_KEY_0: fetch.prune
       GIT_CONFIG_VALUE_0: 'false'
