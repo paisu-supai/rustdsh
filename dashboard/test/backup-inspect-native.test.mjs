@@ -154,10 +154,12 @@ test("regular file/hardlink/parent link and localized errors; isolated native do
   const env={...process.env,PATH:"",DSH_HOME:root,RDSH_LANG:"en"};
   const noNode=spawnSync(binary,["backup-inspect",`--archive-file=${file}`],{env,encoding:"utf8",timeout:10000});
   assert.ifError(noNode.error); assert.equal(noNode.status,0,noNode.stderr);
+  const bad=path.join(root,"bad.json");await fs.writeFile(bad,"{}");
   for(const [language,prefix] of [["en",""],["ja","処理に失敗しました: "],["zh-CN","操作失败："]]){
-    await fs.writeFile(file,"{}"); const r=native(file,root,language);
+    const r=native(bad,root,language);
     assert.equal(r.status,1); assert.equal(r.stderr,`[rdsh-dashboard] ${prefix}invalid_backup_fields\n`);
   }
+  assert.equal(native(linked,root).status,0,"negative locale fixtures must preserve the valid hardlink");
   if(process.platform!=="win32"){
     const leaf=path.join(root,"leaf.json");await fs.symlink(path.join(directory,"archive.json"),leaf);
     const denied=native(leaf,root);assert.equal(denied.status,1);assert.match(denied.stderr,/Invalid backup JSON: require a regular UTF-8 file/);

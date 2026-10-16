@@ -612,8 +612,14 @@ test("CLI previews, reviews, exports, inspects, restores and re-exports a portab
     archiveFile = path.join(f.root, "backup.json"),
     reviewFile = path.join(f.root, "review.json");
   await writeJson(selectionFile, selection);
+  const absoluteNativeBin = path.resolve(
+    fileURLToPath(new URL("../../", import.meta.url)),
+    process.env.RDSH_BIN || process.env.BIN ||
+      path.join("target/debug", process.platform === "win32" ? "rdsh.exe" : "rdsh"),
+  );
   const env = {
     ...process.env,
+    RDSH_BIN: absoluteNativeBin,
     RDSH_DASHBOARD_HOME: path.join(f.root, "home"),
   };
   const run = async (args) =>

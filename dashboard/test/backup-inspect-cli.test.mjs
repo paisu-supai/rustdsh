@@ -33,7 +33,9 @@ test("existing CLI actually reaches current Rust; all locales and argv forms ret
    [["--gpu-request","x","--project","x"],/--gpu-request/],
    [["--from-id","x","--include-project","x"],/project-move/],
    [["--include-project","x","--plan-id","x"],/--include-project/],
-   [["--plan-id","x","--release-id","x"],/state-migrate/],
+   [["--plan-id","x","--release-id","x"],/release/], // release guard precedes migration and plan guards
+   [["--confirm-stale-lock"],/state-migrate/],
+   [["--plan-id","x"],/plan/],
    [[`--archive-file=${file}`,"--expected-revision","3"],action],
    [[`--archive-file=${file}`,"--release-id","x"],/release/],
   ];
