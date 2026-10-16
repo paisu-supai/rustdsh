@@ -1,0 +1,82 @@
+name: catalog-evidence
+
+on:
+  push:
+    branches: [verify/v050-catalog-ci-4853688]
+
+permissions:
+  contents: read
+
+jobs:
+  catalog:
+    if: github.repository == 'paisu-supai/rustdsh'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      CATALOG_BASE: 48536889e52d601d8218a5e26e6e28bf510efa88
+      CATALOG_SOURCE: ffd23786c0eff9f2d64202a0bc17cde5f15921cf
+      GIT_CONFIG_COUNT: 3
+      GIT_CONFIG_KEY_0: fetch.prune
+      GIT_CONFIG_VALUE_0: 'false'
+      GIT_CONFIG_KEY_1: remote.origin.prune
+      GIT_CONFIG_VALUE_1: 'false'
+      GIT_CONFIG_KEY_2: remote.upstream.prune
+      GIT_CONFIG_VALUE_2: 'false'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - name: Verify canonical catalog blobs and create complete original checkout
+        run: |
+          set -euo pipefail
+          git diff --exit-code "$CATALOG_SOURCE" -- dashboard/adapter-catalog-native.mjs dashboard/adapter-catalog.mjs dashboard/adapters.mjs dashboard/cli.mjs dashboard/test/adapter-catalog-cli.test.mjs dashboard/test/adapter-catalog-native.test.mjs dashboard/test/adapter-catalog-peer.rs docs/adapter-catalog-native.md src/adapter_catalog.rs src/main.rs tests/adapter_catalog_cli.rs
+          git worktree add --detach "$RUNNER_TEMP/rdsh-catalog-original" "$CATALOG_BASE"
+          echo "CATALOG_ORIGINAL=$RUNNER_TEMP/rdsh-catalog-original" >> "$GITHUB_ENV"
+          mkdir catalog-evidence
+          git rev-parse HEAD > catalog-evidence/checkout.sha
+          printf '%s\n' "$CATALOG_SOURCE" > catalog-evidence/canonical.sha
+          rustc --version > catalog-evidence/toolchain.txt
+          node --version >> catalog-evidence/toolchain.txt
+          python3 --version >> catalog-evidence/toolchain.txt
+      - name: Install both original declared dashboard dependency trees
+        run: |
+          set -euo pipefail
+          npm ci --prefix dashboard
+          npm ci --prefix "$CATALOG_ORIGINAL/dashboard"
+      - name: Build actual release native and test the Node-free entry
+        run: |
+          set -euo pipefail
+          cargo build --release --locked --bin rdsh
+          cargo test --release --locked --test adapter_catalog_cli --test cli_localization 2>&1 | tee catalog-evidence/rust-tests.log
+          suffix=''
+          if [ "$RUNNER_OS" = Windows ]; then suffix=.exe; fi
+          echo "RDSH_BIN=$GITHUB_WORKSPACE/target/release/rdsh$suffix" >> "$GITHUB_ENV"
+      - name: Exercise actual full CLI and dedicated host, including real deadlines
+        run: |
+          set -euo pipefail
+          node --test dashboard/test/adapter-catalog-cli.test.mjs dashboard/test/adapter-catalog-native.test.mjs 2>&1 | tee catalog-evidence/node-tests.log
+      - name: Measure legacy CLI, native direct and qualified bridge on equal conditions
+        run: |
+          set -euo pipefail
+          python3 scripts/adapter-catalog-evidence.py --root "$GITHUB_WORKSPACE" --native "$RDSH_BIN" --baseline "$CATALOG_BASE" --baseline-root "$CATALOG_ORIGINAL" --samples 7 > catalog-evidence/benchmark.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: catalog-evidence-${{ matrix.os }}
+          path: catalog-evidence/
+          if-no-files-found: error
