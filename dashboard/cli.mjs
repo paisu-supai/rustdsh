@@ -49,6 +49,7 @@ import {
   runResourceCommand,
 } from "./resource-runner.mjs";
 import { backupRequest } from "./backup-client.mjs";
+import { runNativeBackupInspect } from "./backup-inspect-native.mjs";
 import {
   readBackupJson,
   writeHistoryBackup,
@@ -1118,7 +1119,9 @@ try {
     if (action === "inspect") {
       if (!values["archive-file"])
         throw new CliDiagnosticError("error.archiveFile");
-      result = backupInspection(await readBackupJson(values["archive-file"]));
+      process.exitCode = await runNativeBackupInspect(
+        await nativeRdsh(), values["archive-file"], language,
+      );
     } else {
       const project = await identity(values.project || process.cwd());
       if (action === "export" && values["archive-id"]) {
@@ -1162,7 +1165,7 @@ try {
         });
       } else result = await backupRequest(project, "history");
     }
-    console.log(JSON.stringify(result, null, 2));
+    if (action !== "inspect") console.log(JSON.stringify(result, null, 2));
   } else if (command === "integration") {
     const action = positionals[1];
     const options = {
