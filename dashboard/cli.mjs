@@ -21,7 +21,8 @@ import {
 import { readLocalRuntime } from "./private-runtime.mjs";
 import { startDashboard } from "./server.mjs";
 import { runStdio } from "./mcp.mjs";
-import { adapterCatalog, createCliAdapter } from "./adapters.mjs";
+import { createCliAdapter } from "./adapters.mjs";
+import { runNativeAdapterCatalog } from "./adapter-catalog-native.mjs";
 import { smokeAdapter } from "./adapter-smoke.mjs";
 import { SessionLedger, attachRecordedSession } from "./session-ledger.mjs";
 import { preflightCli, readRequirements } from "./preflight.mjs";
@@ -2038,7 +2039,7 @@ try {
     } else {
       if (values.executable || values.entrypoint)
         throw new CliDiagnosticError("error.probeCli");
-      console.log(JSON.stringify({ adapters: adapterCatalog() }, null, 2));
+      process.exitCode = await runNativeAdapterCatalog(await nativeRdsh(), language);
     }
   } else if (["open", "stop", "revoke-events"].includes(command)) {
     const project = values.harness
