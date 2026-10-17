@@ -97,6 +97,13 @@ jobs:
           npm --version >> evidence/toolchain.txt
           rustc --version >> evidence/toolchain.txt
           python --version >> evidence/toolchain.txt
+      - name: Observe unchanged Windows fixtures and host boundaries without repairing settings
+        id: fixtures
+        run: |
+          node .github/scripts/windows-fixture-probes.mjs --self-check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node .github/scripts/windows-fixture-probes.mjs "$env:BEFORE_ROOT" "$env:CANDIDATE_ROOT" evidence/windows-fixtures
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Measure paired real startup, primary RSS and public HTTP with unchanged gates
         run: |
           python $env:RUNTIME_HELPER_FILE --root $env:CANDIDATE_ROOT --native $env:RDSH_BIN --baseline $env:BASE --baseline-root $env:BEFORE_ROOT --samples 7 > evidence/server-cli.json 2> evidence/server-cli.stderr.log
@@ -117,7 +124,7 @@ jobs:
           $status | ConvertTo-Json | Set-Content -Encoding utf8 evidence/server-status.json
           exit $code
       - name: Record paired IO including residual bounded-retry failures
-        if: always() && env.CANDIDATE_ROOT != ''
+        if: success() && env.CANDIDATE_ROOT != '' && steps.fixtures.outcome == 'success'
         run: |
           node .github/scripts/runtime-json-io.mjs "$env:BEFORE_ROOT" "$env:CANDIDATE_ROOT" evidence/io.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
