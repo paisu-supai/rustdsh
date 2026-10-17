@@ -402,6 +402,10 @@ jobs:
         env:
           RDSH_E2E_BIN: ./target/release/rdsh
           RDSH_E2E_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      # The rdsh-ui-comfort DOM test drives a real Chromium, so it belongs to
+      # this job: without playwright-core it silently skips instead of proving
+      # the bundle's key handling.
+      - run: RDSH_PLAYWRIGHT_CORE="$PWD/tests/e2e/node_modules/playwright-core" node --test plugins/rdsh-ui-comfort/test/dom.playwright.test.mjs
       - uses: actions/upload-artifact@v7
         if: always()
         with:
