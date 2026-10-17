@@ -21,8 +21,8 @@ jobs:
         shell: bash
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
-      CATALOG_BASE: cc4406efa81f37045601d08d6bc5e72fd1667d06
-      CATALOG_SOURCE: 1b646ae65ccbadfdb3ce290a20b14062e5b1d038
+      CATALOG_BASE: 5c0c2221b7edba8532ae2a65247365fbc61e0889
+      CATALOG_SOURCE: 3dc1f3bce787c31d6a311ba931cbe060c128576d
       GIT_CONFIG_COUNT: 3
       GIT_CONFIG_KEY_0: fetch.prune
       GIT_CONFIG_VALUE_0: 'false'
@@ -41,6 +41,8 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: dashboard/package-lock.json
+      - name: Self-check owned-child measurement and cleanup with fixtures only
+        run: python3 scripts/adapter-catalog-evidence.py --self-check
       - name: Verify canonical catalog blobs and create complete original checkout
         run: |
           set -euo pipefail
