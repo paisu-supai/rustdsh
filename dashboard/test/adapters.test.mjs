@@ -445,8 +445,17 @@ test("public CLI exposes catalog/probe/smoke and requires an explicit original e
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "rdsh-adapter-cli-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const cli = fileURLToPath(new URL("../cli.mjs", import.meta.url));
+  const binary = path.resolve(fileURLToPath(new URL("../../", import.meta.url)),
+    process.env.RDSH_BIN || process.env.BIN || path.join("target/debug", process.platform === "win32" ? "rdsh.exe" : "rdsh"));
   const catalog = JSON.parse(
-    (await run(process.execPath, [cli, "adapters"])).stdout,
+    (await run(process.execPath, [cli, "adapters"], {
+      env: {
+        ...process.env, RDSH_BIN: binary, DSH_HOME: root, HOME: root, USERPROFILE: root,
+        APPDATA: root, LOCALAPPDATA: root, XDG_CONFIG_HOME: root, XDG_DATA_HOME: root,
+        RDSH_AUTH_AUTOSYNC: "0", RDSH_ORIG_BIN: path.join(root, "missing-original"),
+        DSH_ORIG_BIN: path.join(root, "missing-original"),
+      },
+    })).stdout,
   );
   assert.equal(catalog.adapters.length, 4);
   await assert.rejects(
@@ -525,3 +534,28 @@ test(
     }
   },
 );
+
+test("a launch rejected before ownership stops as not_running instead of unconfirmed", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "rdsh-adapter-no-scope-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  // A rejected spawnOwnedProcess leaves launchAttempted true with no owned
+  // scope, exactly as on a host without an owned process-scope backend. It
+  // must not turn into a stop_unconfirmed that masks the original launch
+  // error behind a cleanup_unconfirmed ledger failure (#548).
+  const adapter = createCliAdapter({
+    command: [process.execPath, fixture],
+    cwd: root,
+    env: { ...process.env, RDSH_ADAPTER_FIXTURE_MODE: "normal" },
+    requestTimeout: 1500,
+    stopTimeout: 150,
+    owner_id: "not-a-valid-owner",
+  });
+  await assert.rejects(adapter.start(), error("invalid_launch"));
+  assert.equal(adapter.launchAttempted, true);
+  assert.ok(!adapter.ownedScope);
+  assert.ok(!adapter.child);
+  assert.deepEqual(await adapter.stop(), {
+    status: "not_running",
+    confirmed: true,
+  });
+});

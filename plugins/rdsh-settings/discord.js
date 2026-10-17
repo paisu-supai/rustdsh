@@ -75,7 +75,9 @@ function presenceText(language, key, count) {
 }
 
 export const discordDefaults = {
-  enabled: true,
+  // Off by default (#585): both features.discord and the legacy
+  // discord.enabled key must be opted in explicitly.
+  enabled: false,
   application_id: defaultDiscordApplicationId,
   details: "",
   show_agent_status: true,
@@ -525,18 +527,22 @@ export function createDiscordPresence({
       return;
     }
     if (stopped) return;
-    // features.discord === false is a kill switch: never connect and never send
-    // SET_ACTIVITY. An absent id keeps the legacy discord.enabled behavior.
-    if (document?.features?.discord === false) {
+    // features.discord is authoritative when written (rdsh features on/off):
+    // true opts the presence in, false is a kill switch that never connects
+    // and never sends SET_ACTIVITY. Without an explicit id the legacy
+    // discord.enabled key applies; both default to OFF (#585).
+    const featureSwitch = document?.features?.discord;
+    if (featureSwitch === false) {
       state = "disabled";
       await disconnect(false);
       return;
     }
+    const enabled = featureSwitch === true || settings.enabled;
     if (
-      !settings.enabled ||
+      !enabled ||
       !/^[1-9][0-9]{16,19}$/.test(settings.application_id)
     ) {
-      state = settings.enabled ? "needs_application_id" : "disabled";
+      state = enabled ? "needs_application_id" : "disabled";
       await disconnect();
       return;
     }

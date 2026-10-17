@@ -57,6 +57,15 @@ test("every dashboard catalog row keeps its placeholders across locales", async 
   }
 });
 
+test("every message key the script asks for has a catalog row", async () => {
+  const source = await read("src/ui.html");
+  const keys = new Set(catalogRows(source).map(row => row.key));
+  const script = source.slice(source.indexOf("<script>"));
+  const asked = [...new Set([...script.matchAll(/\bt\("([^"]+)"/g)].map(match => match[1]))];
+  const missing = asked.filter(key => !keys.has(key));
+  assert.deepEqual(missing, [], `missing catalog rows: ${missing.join(", ")}`);
+});
+
 test("the header names the monitor role while the page title stays the chat-style title", async () => {
   const source = await read("src/ui.html");
   assert.match(source, /<title id="ui-page-title">rdsh dashboard<\/title>/);

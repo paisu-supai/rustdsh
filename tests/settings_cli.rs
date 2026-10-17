@@ -150,18 +150,18 @@ fn discord_settings_round_trip_through_cli_and_section_reset() {
         .status
         .success());
     let reset: serde_json::Value = serde_json::from_str(&fixture.read()).unwrap();
-    assert_eq!(reset["discord"]["enabled"], true);
+    assert_eq!(reset["discord"]["enabled"], false);
     assert_eq!(reset["discord"]["details"], "");
     assert_eq!(reset["discord"]["show_agent_status"], true);
     assert_eq!(reset["discord"]["show_image"], true);
 }
 
 #[test]
-fn discord_defaults_on_and_preserves_explicit_off() {
+fn discord_defaults_off_and_preserves_explicit_on() {
     for (raw, expected) in [
-        ("{}", true),
-        (r#"{"discord":{}}"#, true),
-        (r#"{"discord":{"enabled":false}}"#, false),
+        ("{}", false),
+        (r#"{"discord":{}}"#, false),
+        (r#"{"discord":{"enabled":true}}"#, true), // 既存の明示 on は尊重する
     ] {
         let fixture = Fixture::new(raw);
         assert!(fixture
@@ -175,9 +175,9 @@ fn discord_defaults_on_and_preserves_explicit_off() {
     std::fs::remove_file(fixture.0.join("rdsh.json")).unwrap();
     assert!(fixture.run(&["settings", "init"]).status.success());
     let settings: serde_json::Value = serde_json::from_str(&fixture.read()).unwrap();
-    assert_eq!(settings["discord"]["enabled"], true);
+    assert_eq!(settings["discord"]["enabled"], false);
     assert!(fixture
-        .run(&["settings", "set", "discord.enabled", "false"])
+        .run(&["settings", "set", "discord.enabled", "true"])
         .status
         .success());
     assert!(fixture
@@ -185,7 +185,7 @@ fn discord_defaults_on_and_preserves_explicit_off() {
         .status
         .success());
     let reset: serde_json::Value = serde_json::from_str(&fixture.read()).unwrap();
-    assert_eq!(reset["discord"]["enabled"], true);
+    assert_eq!(reset["discord"]["enabled"], false);
 }
 
 #[test]
@@ -355,8 +355,9 @@ fn feature_state(fixture: &Fixture, id: &str) -> (bool, bool) {
 #[test]
 fn feature_switches_list_defaults_and_round_trip_through_the_cli() {
     let fixture = Fixture::new("{}");
-    // Defaults mirror the behavior that existed before the switches.
-    assert_eq!(feature_state(&fixture, "discord"), (true, false));
+    // Privacy switches start off; existing switches keep their old default.
+    assert_eq!(feature_state(&fixture, "discord"), (false, false));
+    assert_eq!(feature_state(&fixture, "telemetry"), (false, false));
     assert_eq!(feature_state(&fixture, "serve"), (false, false));
     // Delegated agent tools keep normal file access unless the boundary is on.
     assert_eq!(
@@ -382,13 +383,17 @@ fn feature_switches_list_defaults_and_round_trip_through_the_cli() {
         .run(&["settings", "unset", "features.discord"])
         .status
         .success());
-    assert_eq!(feature_state(&fixture, "discord"), (true, false));
+    assert_eq!(feature_state(&fixture, "discord"), (false, false));
 
     // settings keys advertises the switches.
     let keys = fixture.run(&["settings", "keys"]);
     let keys = String::from_utf8_lossy(&keys.stdout);
     assert!(
-        keys.contains("features.discord(bool, default ON)"),
+        keys.contains("features.discord(bool, default OFF)"),
+        "{keys}"
+    );
+    assert!(
+        keys.contains("features.telemetry(bool, default OFF)"),
         "{keys}"
     );
     assert!(keys.contains("features.sound(bool, default ON)"), "{keys}");

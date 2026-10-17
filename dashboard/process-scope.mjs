@@ -551,6 +551,17 @@ export async function spawnOwnedProcess({
         }
         if (lost) continue;
         if (frame.type === "ready") {
+          // The retained exact container is the ownership boundary. A ready
+          // frame that names a different container or kind must not be adopted
+          // as this scope's identity; release it through the exact container.
+          if (
+            docker &&
+            (frame.kernel_id !== docker.id ||
+              frame.kind !== "docker_linux_container")
+          ) {
+            lose();
+            continue;
+          }
           initial = frame;
           if (Number.isSafeInteger(frame.pid) && frame.pid > 0) child.pid = frame.pid;
           readyResolve(frame);

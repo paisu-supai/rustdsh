@@ -106,8 +106,13 @@ pub struct FeatureDef {
 pub const FEATURES: &[FeatureDef] = &[
     FeatureDef {
         id: "discord",
-        default: true,
-        summary: "Discord Rich Presence (needs the DSH web service running)",
+        default: false,
+        summary: "Discord Rich Presence, off by default (needs the DSH web service running)",
+    },
+    FeatureDef {
+        id: "telemetry",
+        default: false,
+        summary: "let delegated DSH send session telemetry (OpenTelemetry)",
     },
     FeatureDef {
         id: "update_check",
@@ -304,7 +309,7 @@ pub struct DiscordSection {
 impl Default for DiscordSection {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             application_id: DEFAULT_DISCORD_APPLICATION_ID.into(),
             details: String::new(),
             show_agent_status: true,
@@ -324,7 +329,7 @@ impl DiscordSection {
         let details = text(v, "details", 128);
         let application_id = text(v, "application_id", 20);
         Self {
-            enabled: flag(v, "enabled", true),
+            enabled: flag(v, "enabled", false),
             application_id: if application_id.trim().is_empty() {
                 DEFAULT_DISCORD_APPLICATION_ID.into()
             } else {
@@ -1371,7 +1376,7 @@ impl RdshSettings {
             "general.dry_run(bool)",
             "general.default_profile(string)",
             "general.language(auto|en|zh-CN|ja)",
-            "discord.enabled(bool, default ON)",
+            "discord.enabled(bool, default OFF)",
             "discord.application_id(string)",
             "discord.details(string, max 128 chars)",
             "discord.show_agent_status(bool)",
@@ -2267,8 +2272,9 @@ mod rdsh_config_tests {
     #[test]
     fn feature_enabled_precedence_and_defaults() {
         let mut c = RdshSettings::default();
-        // 既定値: discord/sound/gitview は on、未知 id は false。
-        assert!(feature_enabled(&c, "discord"));
+        // 既定値: discord/telemetry は off、sound/gitview は on、未知 id は false。
+        assert!(!feature_enabled(&c, "discord"));
+        assert!(!feature_enabled(&c, "telemetry"));
         assert!(feature_enabled(&c, "sound"));
         assert!(feature_enabled(&c, "gitview"));
         assert!(!feature_enabled(&c, "no-such-feature"));
@@ -2282,9 +2288,9 @@ mod rdsh_config_tests {
         assert!(feature_is_explicit(&c, "sound"));
         assert!(feature_is_explicit(&c, "gitview"));
 
-        // features.<id> が未記載なら旧キーを見る。
-        c.discord.enabled = false;
-        assert!(!feature_enabled(&c, "discord"));
+        // features.<id> が未記載なら旧キーを見る（旧 discord.enabled の明示 on は尊重）。
+        c.discord.enabled = true;
+        assert!(feature_enabled(&c, "discord"));
         c.extras.enable = vec!["search-web".to_string()];
         assert!(feature_enabled(&c, "search-web"));
         c.beta.context_engine = true;
@@ -2292,13 +2298,15 @@ mod rdsh_config_tests {
         assert_eq!(enabled_extras(&c), vec!["search-web".to_string()]);
 
         // 明示 features.<id> が最優先で、旧キーを上書きする。
-        c.features.values.insert("discord".to_string(), true);
+        c.features.values.insert("discord".to_string(), false);
+        c.features.values.insert("telemetry".to_string(), true);
         c.features.values.insert("search-web".to_string(), false);
         c.features
             .values
             .insert("context_engine".to_string(), false);
-        assert!(feature_enabled(&c, "discord"));
+        assert!(!feature_enabled(&c, "discord"));
         assert!(feature_is_explicit(&c, "discord"));
+        assert!(feature_enabled(&c, "telemetry"));
         assert!(!feature_enabled(&c, "search-web"));
         assert!(!feature_enabled(&c, "context_engine"));
         assert!(enabled_extras(&c).is_empty());

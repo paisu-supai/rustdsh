@@ -367,14 +367,17 @@ fn base_cmd(
     locale: crate::locale::Locale,
 ) -> anyhow::Result<std::process::Command> {
     if dry || metadata_only {
-        if is_node_entrypoint(orig) {
+        let mut command = if is_node_entrypoint(orig) {
             let mut command = std::process::Command::new(
                 selected_node(orig).unwrap_or_else(|| "node".to_string()),
             );
             command.arg(orig);
-            return Ok(command);
-        }
-        return Ok(std::process::Command::new(orig));
+            command
+        } else {
+            std::process::Command::new(orig)
+        };
+        apply_privacy_default(&mut command);
+        return Ok(command);
     }
     let bin = selected_node(orig).ok_or_else(|| {
         anyhow::anyhow!(match locale {
@@ -406,11 +409,26 @@ fn base_cmd(
         };
         // The rdsh settings card reports this without spawning a second binary.
         command.env("RDSH_VERSION", env!("CARGO_PKG_VERSION"));
+        apply_privacy_default(&mut command);
         return Ok(command);
     }
     let mut command = crate::tool_security::command(orig, &bin, locale)?;
     command.env("RDSH_VERSION", env!("CARGO_PKG_VERSION"));
+    apply_privacy_default(&mut command);
     Ok(command)
+}
+
+/// Privacy default for every delegated DSH run: upstream telemetry stays off
+/// unless the run opted in (`features.telemetry` / RDSH_TELEMETRY=on) or the
+/// user already set DSH_TELEMETRY_DISABLED (any non-empty value disables
+/// upstream). See docs/PRIVACY.md.
+fn apply_privacy_default(cmd: &mut std::process::Command) {
+    let existing = std::env::var("DSH_TELEMETRY_DISABLED").ok();
+    if let Some((key, value)) =
+        crate::slim::telemetry_env(crate::slim::features().telemetry, existing.as_deref())
+    {
+        cmd.env(key, value);
+    }
 }
 
 fn apply_slim(cmd: &mut std::process::Command, slim: bool) {
@@ -1017,5 +1035,53 @@ mod tests {
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect();
         assert!(args.is_empty(), "unexpected delegated argv: {args:?}");
+    }
+
+    /// #585: every delegated run carries DSH_TELEMETRY_DISABLED=1 by default,
+    /// while an explicit user value is never overwritten.
+    #[test]
+    fn delegated_runs_disable_upstream_telemetry_by_default() {
+        let _lock = env_lock();
+        let _env = EnvGuard::set(&["DSH_TELEMETRY_DISABLED", "RDSH_TELEMETRY"]);
+        std::env::remove_var("DSH_TELEMETRY_DISABLED");
+        std::env::remove_var("RDSH_TELEMETRY");
+
+        let dir = std::env::temp_dir().join(format!(
+            "rdsh-telemetry-{}-{}",
+            std::process::id(),
+            crate::local_http::random_token().unwrap()
+        ));
+        std::fs::create_dir(&dir).unwrap();
+        let fixture = dir.join("dsh-orig");
+        std::fs::write(&fixture, "#!/bin/sh\nexit 0\n").unwrap();
+        #[cfg(unix)]
+        make_exec(&fixture);
+        let orig = fixture.to_string_lossy().into_owned();
+
+        let Ok(command) = base_cmd(&orig, false, false, crate::locale::Locale::English) else {
+            std::fs::remove_dir_all(&dir).unwrap();
+            return; // no compatible Node runtime in this environment
+        };
+        let telemetry = command
+            .get_envs()
+            .find(|(key, _)| *key == "DSH_TELEMETRY_DISABLED")
+            .and_then(|(_, value)| value)
+            .map(|value| value.to_string_lossy().into_owned());
+        assert_eq!(telemetry.as_deref(), Some("1"));
+
+        // A value the user set is never overwritten; upstream already treats
+        // any non-empty value (even "0") as an opt-out.
+        std::env::set_var("DSH_TELEMETRY_DISABLED", "0");
+        let Ok(command) = base_cmd(&orig, false, false, crate::locale::Locale::English) else {
+            std::fs::remove_dir_all(&dir).unwrap();
+            return;
+        };
+        assert!(
+            command
+                .get_envs()
+                .all(|(key, _)| key != "DSH_TELEMETRY_DISABLED"),
+            "an explicit DSH_TELEMETRY_DISABLED must not be overwritten"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

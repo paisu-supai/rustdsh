@@ -14,6 +14,15 @@ Use these version-pinned primary sources first:
 
 The version-pinned npm package and its `repository` field are available at [@deepseek-ai/dsh on npm](https://www.npmjs.com/package/@deepseek-ai/dsh). If the installed version differs, use its installed package documentation or matching source tag. `main` pages can describe behavior added after this baseline.
 
+## Measured runtime baseline
+
+Checked 2026-10-17. The installed environment on the recording host was
+`dsh 0.2.0-rc.2` and `rdsh 0.7.0`, and the published npm `latest` was
+still `0.2.0-rc.2`. The safe commands, the per-command record rules, and the
+mismatches observed on that host are in
+[the spec vs runtime procedure](runtime-check.md). Re-measure before treating
+any of those values as current on another host.
+
 ## rdsh implementation
 
 These paths are relative to the `rustdsh` repository checkout:
@@ -21,5 +30,6 @@ These paths are relative to the `rustdsh` repository checkout:
 - [`src/inspect.rs`](../../../../src/inspect.rs) — `rdsh profiles` and `rdsh skills` list directory names; they do not inspect active DSH runtime state.
 - [`src/passthrough.rs`](../../../../src/passthrough.rs) — resolves and delegates to the original DSH CLI. The delegated `dump-config` emits a broad effective profile configuration and is unnecessary for skill validation.
 - [`plugins/install-skills.sh`](../../../install-skills.sh) — installs source-tree skills and third-party filesystem skills into an explicit or default DSH home.
+- [the spec vs runtime procedure](runtime-check.md) — safe version and state commands, the measured values, and the mismatches recorded on 2026-10-17.
 
 Read the current checkout and tests for exact rdsh behavior. Do not infer that a feature works in an installed DSH merely because a local file or directory exists.

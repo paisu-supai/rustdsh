@@ -66,7 +66,7 @@ test('discord switch false disables presence without connecting or sending activ
 });
 
 test('discord switch false stops a connected presence without SET_ACTIVITY', async (t) => {
-  let document = {};
+  let document = { discord: { enabled: true } };
   const { presence, connects, activities } = fakePresence(async () => document);
   t.after(() => presence.stop());
   await presence.refresh();
@@ -80,17 +80,8 @@ test('discord switch false stops a connected presence without SET_ACTIVITY', asy
   assert.deepEqual(activities, []); // the kill switch never clears through the RPC
 });
 
-test('absent discord id keeps the existing connect path', async (t) => {
-  const { presence, connects, activities } = fakePresence(async () => ({}));
-  t.after(() => presence.stop());
-  await presence.refresh();
-  assert.equal(presence.status().state, 'connected');
-  assert.equal(connects.length, 1);
-  assert.equal(activities.length, 1);
-});
-
-test('legacy discord.enabled=false disables, and explicit true cannot resurrect it', async (t) => {
-  for (const document of [{ discord: { enabled: false } }, { discord: { enabled: false }, features: { discord: true } }]) {
+test('discord is off by default and needs an explicit opt-in', async (t) => {
+  for (const document of [{}, { discord: {} }]) {
     const { presence, connects, activities } = fakePresence(async () => document);
     await presence.refresh();
     assert.equal(presence.status().state, 'disabled');
@@ -98,6 +89,29 @@ test('legacy discord.enabled=false disables, and explicit true cannot resurrect 
     assert.deepEqual(activities, []);
     await presence.stop();
   }
+});
+
+test('legacy discord.enabled=true opts in, and explicit features.discord wins', async (t) => {
+  for (const document of [
+    { discord: { enabled: true } },
+    { discord: { enabled: false }, features: { discord: true } },
+  ]) {
+    const { presence, connects, activities } = fakePresence(async () => document);
+    await presence.refresh();
+    assert.equal(presence.status().state, 'connected');
+    assert.equal(connects.length, 1);
+    assert.equal(activities.length, 1);
+    await presence.stop();
+  }
+});
+
+test('legacy discord.enabled=false disables', async (t) => {
+  const { presence, connects, activities } = fakePresence(async () => ({ discord: { enabled: false } }));
+  t.after(() => presence.stop());
+  await presence.refresh();
+  assert.equal(presence.status().state, 'disabled');
+  assert.equal(connects.length, 0);
+  assert.deepEqual(activities, []);
 });
 
 test('throwing loadSettings reports invalid_settings without rejection', async (t) => {

@@ -139,6 +139,10 @@ test('actual headless CLI propagates node-ws through streamSimple and naturally 
         }
       }
     });
+    // Keep the child's stderr for the boundary failures below: a network or
+    // proxy failure otherwise reports only a bare two-second assertion (#528).
+    let errors = '';
+    child.stderr.on('data', chunk => { errors += chunk; });
     let result;
     try {
       result = await Promise.race([
@@ -155,12 +159,14 @@ test('actual headless CLI propagates node-ws through streamSimple and naturally 
         await new Promise(resolve => child.once('close', resolve));
       }
       const details = await (await import('node:fs/promises')).readFile(evidence, 'utf8').catch(() => 'diagnostic unavailable');
-      assert.fail(`headless child exceeded ${result.timeout === 'shutdown' ? 'the two-second shutdown limit after turn_end' : 'the startup/turn-completion limit'}: ${details}`);
+      assert.fail(`headless child exceeded ${result.timeout === 'shutdown' ? 'the two-second shutdown limit after turn_end' : 'the startup/turn-completion limit'}: ${details}; stderr=${JSON.stringify(errors.slice(-2000))}; stdout=${JSON.stringify(output.slice(-2000))}`);
     }
     assert.deepEqual(result, { code: 0, signal: null });
     assert.equal(typeof turnEnded, 'number', 'a completed turn_end must precede natural exit');
-    assert.ok(performance.now() - turnEnded < 2_000, 'natural exit must occur within two seconds after turn_end');
-    const proof = JSON.parse(await (await import('node:fs/promises')).readFile(evidence, 'utf8'));
+    const settled = performance.now() - turnEnded;
+    const diagnosticBody = await (await import('node:fs/promises')).readFile(evidence, 'utf8').catch(() => 'diagnostic unavailable');
+    assert.ok(settled < 2_000, `natural exit must occur within two seconds after turn_end (${settled.toFixed(0)}ms); stderr=${JSON.stringify(errors.slice(-2000))}; stdout=${JSON.stringify(output.slice(-2000))}; diagnostic=${diagnosticBody}`);
+    const proof = JSON.parse(diagnosticBody);
     assert.equal(proof.naturalExitObserved, true, 'beforeExit must prove event-loop completion rather than forced exit 0');
     assert.equal(requests, 1, 'the isolated model turn must make exactly one SDK request');
     assert.match(output, /"phase":"turn_end"/);

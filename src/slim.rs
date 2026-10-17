@@ -1,4 +1,6 @@
 // Slim mode: env-only trims. Additive and safe.
+// Telemetry stays off by default for every delegated run (not only slim);
+// see telemetry_env below and docs/PRIVACY.md.
 // Namespace rule (matches dsh convention: DSH_* is owned by dsh itself,
 // so rdsh-private keys live under RDSH_*). The original dsh ignores keys
 // it does not know, so these hints cannot break boot.
@@ -15,6 +17,8 @@ pub struct SlimFeatures {
     pub disable_voice: bool,
     pub disable_auto_review: bool,
     pub node_compile_cache: bool,
+    /// Opt-in: when true, delegated runs leave upstream DSH telemetry alone.
+    pub telemetry: bool,
 }
 
 impl Default for SlimFeatures {
@@ -24,6 +28,7 @@ impl Default for SlimFeatures {
             disable_voice: true,
             disable_auto_review: true,
             node_compile_cache: true,
+            telemetry: false,
         }
     }
 }
@@ -37,12 +42,36 @@ pub fn configure(cfg: &crate::rdsh_config::RdshSettings) {
         disable_voice: crate::rdsh_config::feature_enabled(cfg, "slim_disable_voice"),
         disable_auto_review: crate::rdsh_config::feature_enabled(cfg, "slim_disable_auto_review"),
         node_compile_cache: crate::rdsh_config::feature_enabled(cfg, "node_compile_cache"),
+        telemetry: crate::rdsh_config::feature_enabled(cfg, "telemetry")
+            || telemetry_opt_in(std::env::var("RDSH_TELEMETRY").ok().as_deref()),
     });
 }
 
 /// Active switches (defaults until configure runs).
 pub fn features() -> SlimFeatures {
     *FEATURES.get_or_init(SlimFeatures::default)
+}
+
+/// True when RDSH_TELEMETRY asks for one run to keep upstream telemetry on.
+/// Only an affirmative word counts; everything else keeps the default (off).
+pub fn telemetry_opt_in(value: Option<&str>) -> bool {
+    matches!(
+        value.map(|v| v.trim().to_ascii_lowercase()).as_deref(),
+        Some("on" | "1" | "true" | "yes")
+    )
+}
+
+/// The default-off telemetry hint for delegated DSH runs, or None when the
+/// run opted in or the user already set DSH_TELEMETRY_DISABLED themselves
+/// (upstream treats any non-empty value, including `0`/`false`, as off).
+pub fn telemetry_env(
+    enabled: bool,
+    existing: Option<&str>,
+) -> Option<(&'static str, &'static str)> {
+    if enabled || existing.is_some_and(|value| !value.is_empty()) {
+        return None;
+    }
+    Some(("DSH_TELEMETRY_DISABLED", "1"))
 }
 
 /// Hints applied to delegated runs, filtered by the feature switches.
@@ -156,5 +185,35 @@ mod tests {
             default_cache_dir_for("/home/u"),
             "/home/u/.cache/rdsh-node-compile-cache"
         );
+    }
+
+    #[test]
+    fn telemetry_is_disabled_by_default_and_opt_in_removes_the_hint() {
+        assert!(!SlimFeatures::default().telemetry);
+        assert_eq!(
+            telemetry_env(false, None),
+            Some(("DSH_TELEMETRY_DISABLED", "1"))
+        );
+        // features.telemetry=true / RDSH_TELEMETRY=on leave the child env alone.
+        assert_eq!(telemetry_env(true, None), None);
+        // A value the user set is left untouched: upstream treats any
+        // non-empty value, including "0"/"false", as an opt-out.
+        assert_eq!(telemetry_env(false, Some("0")), None);
+        assert_eq!(telemetry_env(false, Some("1")), None);
+        // An empty value counts as unset, like the compile-cache hint.
+        assert_eq!(
+            telemetry_env(false, Some("")),
+            Some(("DSH_TELEMETRY_DISABLED", "1"))
+        );
+    }
+
+    #[test]
+    fn telemetry_opt_in_accepts_only_affirmative_words() {
+        for value in ["on", "ON", "1", "true", "yes", " on "] {
+            assert!(telemetry_opt_in(Some(value)), "{value}");
+        }
+        for value in [None, Some("off"), Some("0"), Some("false"), Some("")] {
+            assert!(!telemetry_opt_in(value), "{value:?}");
+        }
     }
 }

@@ -296,8 +296,9 @@ unselect, saved-copy removal and provider revocation steps before a key save.
 
 ### Optional extras (off by default)
 
-Server-type features stay off until enabled, so a plain install remains
-a fast dsh:
+Server-type features and the privacy-sensitive switches (`discord`,
+`telemetry`) stay off until enabled, so a plain install remains a fast,
+telemetry-free dsh:
 
 ```sh
 rdsh settings set extras.enable serve,search-web
@@ -713,6 +714,7 @@ For startup, run `rdsh bench --n 5`. See
 2. **Non-Destructive**: Read operations (tokens, search, session listing, compacting) never modify source files.
 3. **Explicit Auth**: Credentials are never sent externally or synced automatically; only user-approved items are imported.
 4. **Tool Sandboxing** (opt-in): On Linux, `--share-file` mounts only the files you share, read-only and without network, for the `rdsh_inspect` tool. Other DSH tools follow upstream permissions and approvals.
+5. **Privacy Defaults**: Session telemetry, Discord Rich Presence and update probing stay off unless you opt in; every delegated `dsh` receives `DSH_TELEMETRY_DISABLED=1`. See [docs/PRIVACY.md](docs/PRIVACY.md).
 
 ## FAQ
 
@@ -739,6 +741,7 @@ For startup, run `rdsh bench --n 5`. See
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Architecture design and delegation model |
 | [docs/BENCHMARKS.md](docs/BENCHMARKS.md) | Benchmark methodology and reproduction steps |
 | [docs/RDSH-SETTINGS.md](docs/RDSH-SETTINGS.md) | Settings UI and CLI options |
+| [docs/PRIVACY.md](docs/PRIVACY.md) | What stays off by default and how to opt in |
 | [docs/PROVIDERS.md](docs/PROVIDERS.md) | `rdsh provider`: HAI, Sarashina and home LLM server routes |
 | [docs/DESKTOP-INTEGRATION.md](docs/DESKTOP-INTEGRATION.md) | DeepSeek Harness Desktop (Electron) integration |
 | [docs/FEDORA.md](docs/FEDORA.md) | Fedora / RHEL packages, optional tools, and the Linux desktop reality |

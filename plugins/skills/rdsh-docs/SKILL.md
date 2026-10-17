@@ -9,7 +9,7 @@ Use the references below to check the installed DSH version and current rdsh imp
 
 ## Establish the scope
 
-This skill was checked against `@deepseek-ai/dsh` 0.2.0-rc.2, npm `latest` on 2026-10-10, and the `web` profile's `standard` and `cordis` presets. The matching upstream tag is `dsh-v0.2.0-rc.2`. Treat those as the verified baseline, not a claim about a different install, fork, or later release. Confirm `dsh --version` and `rdsh --version`; if the versions or source differ, use the installed package's own documentation and source before applying these references.
+This skill was checked against `@deepseek-ai/dsh` 0.2.0-rc.2, npm `latest` on 2026-10-10, and the `web` profile's `standard` and `cordis` presets. The matching upstream tag is `dsh-v0.2.0-rc.2`. The rdsh side was last checked against installed `rdsh 0.7.0` on 2026-10-17. Treat those as the verified baseline, not a claim about a different install, fork, or later release. Confirm `dsh --version` and `rdsh --version`; if the versions or source differ, use the installed package's own documentation and source before applying these references.
 
 Identify the active profile and preset from the current session or the launch context supplied by the user. If neither reveals them, report them as unknown. Do not launch a different profile or change the current preset to discover its behavior.
 
@@ -26,6 +26,10 @@ Report these as separate facts:
 
 The `standard` preset provides filesystem skill discovery and the model-facing skill catalog/loader. The `cordis` preset also provides read-only runtime inspection. In that preset, use `cordis_inspect_list` to find a provider and `cordis_inspect_query` for only the declarations needed. Inspection reports APIs, configuration schemas, or visible tools; it does not invoke business methods or prove that an operation works. Do not infer the active preset from an inspection tool that might also be mounted elsewhere.
 
+## Reconcile spec against the runtime
+
+Before relying on the baseline, compare it with the installed versions and the current configuration, and write down the diff. [The spec vs runtime procedure](references/runtime-check.md) lists the safe commands, the measured values, and the mismatches already recorded: the native route readers can skip a profile that does declare routes, so "not listed" is not "not configured".
+
 ## Keep inspection read-only
 
 - Safe version checks: `dsh --version` and `rdsh --version`.
@@ -36,7 +40,7 @@ The `standard` preset provides filesystem skill discovery and the model-facing s
 
 ## Investigate and implement
 
-For DSH behavior, load the matching references in [the source index](references/source-index.md). For rdsh behavior, read the relevant local implementation and tests linked there. Check the installed package version and actual call path before relying on current upstream `main` documentation. When debugging, identify the smallest failing boundary and separate the reproduction from assumptions about its cause.
+For DSH behavior, load the matching references in [the source index](references/source-index.md). For rdsh behavior, read the relevant local implementation and tests linked there. If the installed version or configuration may differ from the baseline, run [the reconciliation procedure](references/runtime-check.md) first. Check the installed package version and actual call path before relying on current upstream `main` documentation. When debugging, identify the smallest failing boundary and separate the reproduction from assumptions about its cause.
 
 Before making a configuration or plugin change, state which profile, preset, and files it affects. Prefer the documented plugin or skill mechanism, keep the change narrowly scoped, and add a regression check for the demonstrated behavior. Do not silently modify unrelated user settings or install a different DSH version.
 

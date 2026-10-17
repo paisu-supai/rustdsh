@@ -56,10 +56,16 @@ async function fingerprintFiles(names) {
   }
   return hash.digest("hex");
 }
+// Every local module on the ownership path is fingerprinted. The supervisor,
+// the Linux cgroup/Windows Job backends and the read-only Darwin reader decide
+// identity and containment together; evidence must change when any of them does.
+export const sourceFingerprintFiles = ["fault-simulator.mjs", ...fixtureFiles,
+  "adapters.mjs", "tracked-adapter.mjs", "session-ledger.mjs", "run-history.mjs",
+  "process-scope.mjs", "process-scope-supervisor.mjs", "process-scope-backends.mjs",
+  "process-identity.mjs", "process-identity-windows.mjs",
+  "darwin-process-identity.mjs", "retry.mjs", "package-lock.json"];
 async function sourceFingerprint() {
-  return fingerprintFiles(["fault-simulator.mjs", ...fixtureFiles, "adapters.mjs",
-    "tracked-adapter.mjs", "session-ledger.mjs", "run-history.mjs", "process-scope.mjs",
-    "process-scope-backends.mjs", "process-identity.mjs", "process-identity-windows.mjs", "retry.mjs", "package-lock.json"]);
+  return fingerprintFiles(sourceFingerprintFiles);
 }
 async function targetSnapshot() {
   try {
@@ -164,7 +170,7 @@ async function reproducibilityManifest(input, inputBytes, fingerprint) {
     },
     target,
     source: { fingerprint_sha256: fingerprint,
-      fingerprint_scope: "simulator, fixture, adapter, ledger, run-history, process-scope, process identity, retry and dependency lock files",
+      fingerprint_scope: "simulator, fixture, adapter, ledger, run-history, process-scope (including supervisor), process identity (Linux, Windows and Darwin), retry and dependency lock files",
       fixture: { id: "offline-control-plane-v1", sha256: fixtureHash,
         files: fixtureFiles, reported_cli_version: "0.2.0-rc.2",
         protocol_methods: fixtureMethods } },
@@ -322,7 +328,7 @@ export async function runFaultSimulation({ outputDirectory, scenario = "all", se
     reproducibility_manifest: { path: "reproducibility.json",
       sha256: createHash("sha256").update(reproducibilityBytes).digest("hex") },
     runtime: { platform: process.platform, node: process.versions.node },
-    source_fingerprint_scope: "simulator files, fixtures, adapters, tracked-adapter, session-ledger, run-history, process identity (including Windows), process-scope, process-scope-backends, retry and dashboard package-lock",
+    source_fingerprint_scope: "simulator files, fixtures, adapters, tracked-adapter, session-ledger, run-history, process identity (Linux, Windows and Darwin), process-scope, process-scope-supervisor, process-scope-backends, retry and dashboard package-lock",
     verification_scope: "offline_control_plane_with_mock_CLI_and_mock_GPU; no_real_model_or_GPU_verification",
     passed: results.every((r) => r.passed), results };
   await fs.writeFile(path.join(directory, "report.json"), json(report), { flag: "wx", mode: 0o600 });

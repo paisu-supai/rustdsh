@@ -372,13 +372,30 @@ test("platform paths and text limits preserve Unicode and omit disabled fields",
   assert.ok(!("timestamps" in activity));
 });
 
-test("unconfigured presence connects by default; missing or blank ID uses the bundled dsh application", async (t) => {
+test("presence is off by default and never connects without an opt-in", async (t) => {
+  for (const config of [{}, { discord: {} }, { discord: { application_id: "123456789012345678" } }]) {
+    const presence = createDiscordPresence({
+      loadSettings: async () => config,
+      interval: 1e6,
+      connect: async () => {
+        throw new Error("telemetry-free default must not connect");
+      },
+    });
+    try {
+      await presence.refresh();
+      assert.equal(presence.status().state, "disabled");
+    } finally {
+      await presence.stop();
+    }
+  }
+});
+
+test("opted-in presence with a missing or blank ID uses the bundled dsh application", async (t) => {
   const fake = await fakeDiscord(t);
   for (const config of [
-    {},
-    { discord: {} },
-    { discord: { application_id: "" } },
-    { discord: { application_id: "  " } },
+    { discord: { enabled: true } },
+    { discord: { enabled: true, application_id: "" } },
+    { discord: { enabled: true, application_id: "  " } },
   ]) {
     const presence = createDiscordPresence({
       loadSettings: async () => config,
@@ -536,7 +553,7 @@ for (const [language, details, idle, running] of [
   test(`Discord owned defaults follow ${language} while custom text and RPC fields remain exact`, async () => {
     const config = {
       general: { language },
-      discord: { ...discordDefaults, show_image: false },
+      discord: { ...discordDefaults, enabled: true, show_image: false },
     };
     const sent = [];
     const presence = createDiscordPresence({

@@ -164,6 +164,29 @@ const fs=require('fs'),f=process.env.RDSH_DOCKER_ATTACH_STATE,s=JSON.parse(fs.re
   assert.deepEqual(after.removed, ["c".repeat(64)]);
   assert.equal(after.foreign, "f".repeat(64));
 });
+test("a Docker ready frame that names a different container is never adopted and releases the exact container", { skip: process.platform === "win32" && "requires a POSIX executable fake Docker shim" }, async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "rdsh-fake-docker-binding-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const state = path.join(root, "state.json"), bin = path.join(root, "docker"), owner = "owner_" + randomUUID();
+  const id = "b".repeat(64), other = "c".repeat(64), foreign = "f".repeat(64);
+  const previous = process.env.RDSH_DOCKER_BINDING_STATE;
+  process.env.RDSH_DOCKER_BINDING_STATE = state;
+  t.after(() => { if (previous === undefined) delete process.env.RDSH_DOCKER_BINDING_STATE; else process.env.RDSH_DOCKER_BINDING_STATE = previous; });
+  await fs.writeFile(state, JSON.stringify({ owner, id, other, foreign, status: "running", removed: [], killed: [] }));
+  await fs.writeFile(bin, `#!/usr/bin/env node
+const fs=require('fs'),f=process.env.RDSH_DOCKER_BINDING_STATE,s=JSON.parse(fs.readFileSync(f));const raw=process.argv.slice(2);let a=raw;if(a[0]=='--context'||a[0]=='--host')a=a.slice(2);if(a[0]=='context'){console.log(a[1]==='inspect'?'${fakeColimaEndpoint}':'colima');process.exit()}if(a[0]=='info'){console.log('binding-test-engine');process.exit()}if(a[0]=='version'){console.log('linux/arm64');process.exit()}if(a[0]=='create'){console.log(s.id);process.exit()}if(a[0]=='inspect'){const target=a.at(-1);if(target===s.id||target===s.foreign)console.log(target===s.id?s.status:'running');else console.log(s.id+'\\n'+s.owner);process.exit()}if(a[0]=='kill'){s.killed.push(a.at(-1));s.status='exited';fs.writeFileSync(f,JSON.stringify(s));process.exit()}if(a[0]=='rm'){s.removed.push(a.at(-1));fs.writeFileSync(f,JSON.stringify(s));process.exit()}if(a[0]=='start'){const readline=require('readline');const input=readline.createInterface({input:process.stdin});input.on('line',line=>{const g=JSON.parse(line);if(g.op==='start')console.log(JSON.stringify({type:'ready',pid:null,identity:null,kind:'docker_linux_container',kernel_id:s.other,execution_platform:'linux',transport:'colima_docker'}));});setTimeout(()=>process.exit(0),80)}`);
+  await fs.chmod(bin, 0o755);
+  const entry = path.join(root, "entry.mjs");
+  await fs.writeFile(entry, "process.exit(0);\n");
+  await assert.rejects(
+    spawnOwnedProcess({ command: ["/usr/local/bin/node", entry], cwd: root, dockerWorker: { dockerBin: bin, mountRoots: [root] }, owner_id: owner, startupTimeoutMs: 5000 }),
+    (error) => error.code === "ownership_unavailable",
+  );
+  const after = JSON.parse(await fs.readFile(state));
+  assert.deepEqual(after.removed, [id]);
+  assert.deepEqual(after.killed, [id]);
+  assert.equal(after.foreign, foreign);
+});
 test("Docker Linux worker requires an explicit pinned image, Linux runtime, and mapped workspace paths", { skip: process.platform === "win32" && "requires a POSIX executable fake Docker shim" }, async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "rdsh-docker-worker-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));

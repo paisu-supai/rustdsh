@@ -102,6 +102,8 @@ Discord Web版には対応していません。
 
 設定は `$DSH_HOME/rdsh.json` の `discord` セクションで、Rust CLIと共有されます。
 CLIからも変更でき、起動中のプラグインが5秒以内を目安に再読み込みします。
+**Discord Rich Presence は既定で OFF** です（#585）。有効化するには
+`rdsh features on discord` または `discord.enabled: true` を指定します。
 
 ```sh
 rdsh settings set discord.enabled true

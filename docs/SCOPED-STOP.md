@@ -92,7 +92,8 @@ are not exercised by the checked-in evidence.
 | --- | --- | --- | --- |
 | Windows | Retained unnamed Job handle | Process birth time and machine scope | Native lifecycle and Tunnel identity fixtures run. |
 | Linux | Delegated writable cgroup v2, cgroup.kill and pidfds | Process birth time and boot scope | Native lifecycle and Tunnel identity fixtures run; missing delegation or native support fails the test. |
-| macOS and other systems | No backend; rejects with ownership_unavailable | No reader; identity remains unknown | Portable validation and explicit rejection regressions run; individual positive fixtures state the missing prerequisite. |
+| macOS | No native backend; rejects with ownership_unavailable. An operator may select the explicit Colima Linux worker above for a command valid in the pinned image. | Read-only libproc birth and boot-session identity | Native ownership fixtures state the missing prerequisite; the explicit worker's Colima fixtures run only on macOS. |
+| Other systems | No backend; rejects with ownership_unavailable | No reader; identity remains unknown | Portable validation and explicit rejection regressions run; individual positive fixtures state the missing prerequisite. |
 
 An ownership_unavailable startup rejection has no retained adapter-owned child or scope. It includes either no spawned supervisor or confirmed supervisor cleanup, so stopping that adapter reports not_running and an isolated smoke removes its unused private home while retaining the original diagnostic. Unknown startup cleanup and cleanup failures after ownership acquisition remain unconfirmed; smoke reports smoke_cleanup_unconfirmed and retains its private home.
 

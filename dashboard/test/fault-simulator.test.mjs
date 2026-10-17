@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { runFaultSimulation, faultScenarios, restartCheckpointIdentity } from "../fault-simulator.mjs";
+import { runFaultSimulation, faultScenarios, restartCheckpointIdentity, sourceFingerprintFiles } from "../fault-simulator.mjs";
 
 const exec = promisify(execFile);
 const entry = fileURLToPath(new URL("../fault-simulator.mjs", import.meta.url));
@@ -173,3 +173,28 @@ test("non-loopback TCP, TLS and UDP are denied before opening a connection", asy
     { env: { ...process.env, RDSH_FAULT_ISOLATED: "1" }, windowsHide: true, timeout: 10000 });
   assert.deepEqual(JSON.parse(stdout), { loopback_connections: 0, blocked_connections: 3 });
 });
+
+test("the evidence fingerprint covers every local module on the ownership path", async () => {
+  const dashboardDirectory = fileURLToPath(new URL("..", import.meta.url));
+  const localImports = async (name) =>
+    [...(await fs.readFile(path.join(dashboardDirectory, name), "utf8")).matchAll(
+      /["'`](\.\/[A-Za-z0-9._-]+\.mjs)["'`]/g,
+    )].map((match) => match[1].slice(2));
+  // Roots that decide ownership, identity and containment. Every reachable
+  // local module must be fingerprinted or the evidence stops binding the code.
+  const pending = ["process-scope.mjs", "process-identity.mjs"];
+  const reachable = new Set();
+  while (pending.length) {
+    const name = pending.pop();
+    if (reachable.has(name)) continue;
+    reachable.add(name);
+    pending.push(...(await localImports(name)));
+  }
+  assert(reachable.size >= 5);
+  for (const name of reachable)
+    assert(
+      sourceFingerprintFiles.includes(name),
+      name + " is outside the evidence fingerprint scope",
+    );
+});
+

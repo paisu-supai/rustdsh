@@ -5,6 +5,26 @@ Format follows Keep a Changelog, versioning follows Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- `features.telemetry` (default off) and `RDSH_TELEMETRY=on`: delegated `dsh`
+  runs now receive `DSH_TELEMETRY_DISABLED=1` by default, so upstream session
+  telemetry (OpenTelemetry) is not sent unless the user opts in. A
+  `DSH_TELEMETRY_DISABLED` already present in the environment is never
+  overwritten (#585).
+
+- `docs/PRIVACY.md` documents what rustdsh keeps off by default, how to
+  enable it, and the limits (network filtering and the Electron desktop
+  runtime are outside rustdsh's control). README.md, README.ja.md and
+  docs/RDSH-SETTINGS.md link to it (#585).
+
+### Changed
+
+- Discord Rich Presence is now off by default: `features.discord` and the
+  legacy `discord.enabled` both default to false, and the bundled settings
+  plugin keeps the two in step (`features.discord` wins when written).
+  Existing `rdsh.json` files with an explicit `true` stay enabled (#585).
+
 ## [0.7.0] - 2026-10-17
 
 ### Added

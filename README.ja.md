@@ -287,7 +287,8 @@ Web 画面では保存を行う前に、保存先や利用範囲、ならびに�
 
 ### 追加機能（初期状態では OFF）
 
-サーバー型の機能は有効化するまで動作しません。初期状態では高速な dsh として動作します。
+サーバー型の機能とプライバシーに関わるスイッチ（`discord` / `telemetry`）は
+有効化するまで動作しません。初期状態では高速でテレメトリを送らない dsh として動作します。
 設定画面（`rdsh setup --web` の追加機能欄）または CLI で有効化します：
 
 ```sh
@@ -587,6 +588,7 @@ python3 scripts/benchmark-node-vs-rust.py --bin ./target/release/rdsh \
 2. **非破壊設計**: トークン計算、検索、ログ圧縮などの読み取り系コマンドは、既存のファイルを一切変更しません。
 3. **明示的な認証管理**: 他アプリの認証情報を無断で同期・送信せず、利用者が明示的に指定したものだけを取り込みます。
 4. **サンドボックス隔離**（オプトイン）: Linux 環境では、`--share-file` で共有したファイルだけを読み取り専用・ネットワークなしで `rdsh_inspect` に渡します。その他の DSH ツールは upstream の権限と承認に従います。
+5. **プライバシー既定**: セッション telemetry・Discord Rich Presence・更新確認は明示的に有効化するまで off。委譲する `dsh` には `DSH_TELEMETRY_DISABLED=1` を渡します。詳細は [docs/PRIVACY.md](docs/PRIVACY.md)。
 
 ## よくある質問
 
@@ -613,6 +615,7 @@ python3 scripts/benchmark-node-vs-rust.py --bin ./target/release/rdsh \
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 委譲の仕組みとアーキテクチャ設計 |
 | [docs/BENCHMARKS.md](docs/BENCHMARKS.md) | ベンチマークの詳細と再現手順 |
 | [docs/RDSH-SETTINGS.md](docs/RDSH-SETTINGS.md) | 設定画面の機能と CLI キー一覧 |
+| [docs/PRIVACY.md](docs/PRIVACY.md) | 既定で送らない通信と有効化の方法 |
 | [docs/DESKTOP-INTEGRATION.md](docs/DESKTOP-INTEGRATION.md) | デスクトップアプリ (Electron) との連携 |
 | [docs/FEDORA.md](docs/FEDORA.md) | Fedora / RHEL 向けパッケージ・任意ツール・Linux でのデスクトップ事情 |
 | [docs/PACKAGE-MANAGERS.md](docs/PACKAGE-MANAGERS.md) | Homebrew・Scoop・winget での導入とマニフェストの更新 |
