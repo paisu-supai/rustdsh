@@ -2,10 +2,15 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { normalizeKanaThreshold, protectLiterals, restoreLiterals, buildTranslationPrompt } from './translation-core.js';
 
 export const inject = ['commands', 'llm'];
 const MAX_BYTES = 64 * 1024;
+// 置換ノードはcompactionのcheckpointと同じくuser/messageでしか追加できない
+// （assistant/messageは開いているstepを要求する）。専用のsource.kindで
+// compact-checkpointと区別し、表示側が置換と判定できるようにする。
+const REPLACEMENT_SOURCE = 'rdsh-translation';
 class PreviewError extends Error {}
 
 // 読み手向けの文言はこのカタログだけが持つ。モデルへの翻訳指示と保護トークンは
@@ -30,7 +35,10 @@ const MESSAGES = Object.freeze({
   'config.read': { en: 'Check rdsh.json', zh: '请检查 rdsh.json', ja: 'rdsh.jsonを確認してください' },
   'auth.unavailable': { en: 'Could not confirm authentication', zh: '无法确认认证', ja: '認証を確認できません' },
   'method.unavailable': { en: 'This operation is not available', zh: '此操作不可用', ja: 'この操作は利用できません' },
+  'answer.replaced': { en: 'This answer was already replaced by its Japanese translation', zh: '此回答已替换为日文翻译', ja: 'この回答はすでに日本語訳へ置き換えられています' },
+  'replace.failed': { en: 'The answer could not be replaced in the conversation history', zh: '无法在会话历史中替换回答', ja: '回答を会話履歴上で置き換えられませんでした' },
   'command.description': { en: 'Show a Japanese translation of the answer (the conversation history is unchanged)', zh: '显示回答的日文翻译（不更改会话历史）', ja: '回答の日本語訳を表示します（会話履歴は変更しません）' },
+  'command.replace': { en: 'Replace the answer with its Japanese translation in the conversation history', zh: '在会话历史中用日文翻译替换回答', ja: '回答を日本語訳で会話履歴上に置き換えます' },
 });
 function message(language, key) { return MESSAGES[key][language] ?? MESSAGES[key].en; }
 const reject = (language, key) => { throw new PreviewError(message(language, key)); };
@@ -63,11 +71,19 @@ export async function readSettings(language = translationLanguage()) {
   }
 }
 
+/** Whether one earlier replacement already shadowed this surface node. */
+function isReplaced(events, seq) {
+  return events.some((item) => item.type === 'user/message' && item.surfaceOp !== undefined && item.surfaceOp !== 'append'
+    && Array.isArray(item.sourceEventSeqs) && item.sourceEventSeqs.includes(seq));
+}
+
 export function findAnswer(agent, messageId, language = translationLanguage()) {
   if (typeof messageId !== 'string' || !/^[A-Za-z0-9._:-]{1,200}$/u.test(messageId)) reject(language, 'answer.id');
   const events = agent.session.snapshotEvents();
   const event = events.find((item) => item.type === 'assistant/message' && item.data?.message?.id === messageId);
-  if (!event || event.data.interrupted || !agent.session.surface.nodes.includes(event.seq)) reject(language, 'answer.missing');
+  if (!event) reject(language, 'answer.missing');
+  if (!agent.session.surface.nodes.includes(event.seq)) reject(language, isReplaced(events, event.seq) ? 'answer.replaced' : 'answer.missing');
+  if (event.data.interrupted) reject(language, 'answer.missing');
   if (!events.some((item) => item.type === 'turn/end' && item.data?.turn === event.data.turn && item.data?.reason?.kind === 'completed')) {
     reject(language, 'answer.unfinished');
   }
@@ -89,43 +105,78 @@ export function translationRoute(agent, language = translationLanguage()) {
   return { provider, model };
 }
 
-export async function translatePreview({ agent, llm, messageId, signal, timeoutMs = 60000, language = translationLanguage() }) {
+/**
+ * Run one independent translation of the target answer. Must be called inside
+ * `agent.runMaintenance`; returns the validated target and the restored text.
+ */
+async function translateTarget({ agent, llm, messageId, signal, agentSignal, timeoutMs, language }) {
+  const target = findAnswer(agent, messageId, language);
+  const route = translationRoute(agent, language);
+  const input = protectLiterals(target.text);
+  const controller = new AbortController();
+  const combined = AbortSignal.any([signal, agentSignal, controller.signal].filter(Boolean));
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    combined.throwIfAborted();
+    let text = '';
+    let finish;
+    for await (const chunk of llm.stream({ ...route, messages: [{ role: 'user', content: [{ type: 'text', text: buildTranslationPrompt(input.masked, input.literals) }] }], temperature: 0, maxTokens: 8192, signal: combined })) {
+      combined.throwIfAborted();
+      if (chunk.type === 'text-delta') {
+        if (typeof chunk.text !== 'string') reject(language, 'result.shape');
+        text += chunk.text;
+        if (Buffer.byteLength(text) > MAX_BYTES) reject(language, 'result.oversized');
+      }
+      if (chunk.type === 'finish') finish = chunk.reason;
+    }
+    combined.throwIfAborted();
+    if (finish?.kind !== 'stop' || !text.trim()) reject(language, 'result.incomplete');
+    const current = findAnswer(agent, messageId, language);
+    if (current.seq !== target.seq || current.text !== target.text) reject(language, 'answer.changed');
+    try { return { target, text: restoreLiterals(text, input.literals) }; }
+    catch { reject(language, 'literals.lost'); }
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
+}
+
+/** Admit translation work only while the agent is idle, then report failures. */
+async function runTranslation({ agent, language, job }) {
   if (agent.status !== 'idle') return { kind: 'error', text: message(language, 'agent.busy') };
   try {
-    return await agent.runMaintenance(async (agentSignal) => {
-      const target = findAnswer(agent, messageId, language);
-      const route = translationRoute(agent, language);
-      const input = protectLiterals(target.text);
-      const controller = new AbortController();
-      const combined = AbortSignal.any([signal, agentSignal, controller.signal].filter(Boolean));
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      try {
-        combined.throwIfAborted();
-        let text = '';
-        let finish;
-        for await (const chunk of llm.stream({ ...route, messages: [{ role: 'user', content: [{ type: 'text', text: buildTranslationPrompt(input.masked, input.literals) }] }], temperature: 0, maxTokens: 8192, signal: combined })) {
-          combined.throwIfAborted();
-          if (chunk.type === 'text-delta') {
-            if (typeof chunk.text !== 'string') reject(language, 'result.shape');
-            text += chunk.text;
-            if (Buffer.byteLength(text) > MAX_BYTES) reject(language, 'result.oversized');
-          }
-          if (chunk.type === 'finish') finish = chunk.reason;
-        }
-        combined.throwIfAborted();
-        if (finish?.kind !== 'stop' || !text.trim()) reject(language, 'result.incomplete');
-        const current = findAnswer(agent, messageId, language);
-        if (current.seq !== target.seq || current.text !== target.text) reject(language, 'answer.changed');
-        try { return { kind: 'success', text: restoreLiterals(text, input.literals) }; }
-        catch { reject(language, 'literals.lost'); }
-      } finally {
-        clearTimeout(timer);
-        controller.abort();
-      }
-    });
+    return await agent.runMaintenance(job);
   } catch (error) {
     return { kind: 'error', text: error instanceof PreviewError ? error.message : message(language, 'translation.failed') };
   }
+}
+
+export async function translatePreview({ agent, llm, messageId, signal, timeoutMs = 60000, language = translationLanguage() }) {
+  return runTranslation({ agent, language, job: async (agentSignal) => {
+    const { text } = await translateTarget({ agent, llm, messageId, signal, agentSignal, timeoutMs, language });
+    return { kind: 'success', text };
+  } });
+}
+
+/**
+ * Replace the target answer on the model-visible surface with its Japanese
+ * translation, without adding a turn or a follow-up user request. The original
+ * record stays in the append-only log and in the human transcript.
+ */
+export async function replaceTranslation({ agent, llm, messageId, signal, timeoutMs = 60000, language = translationLanguage() }) {
+  return runTranslation({ agent, language, job: async (agentSignal) => {
+    const { target, text } = await translateTarget({ agent, llm, messageId, signal, agentSignal, timeoutMs, language });
+    let event;
+    try {
+      event = agent.session.append('user/message', {
+        id: randomUUID(),
+        role: 'user',
+        content: [{ type: 'text', text }],
+        source: { kind: REPLACEMENT_SOURCE },
+      }, { surfaceOp: { op: 'replace', startSeq: target.seq, endSeq: target.seq }, sourceEventSeqs: [target.seq] });
+    } catch { reject(language, 'replace.failed'); }
+    return { kind: 'success', text, replacedSeq: target.seq, replacementSeq: event.seq };
+  } });
 }
 
 function json(req, res, status, value) {
@@ -149,9 +200,11 @@ export function registerConfigApi(ctx) {
 export function apply(ctx) {
   const language = translationLanguage();
   return ctx.effect(() => {
-    const off = ctx.commands.register({ name: 'ja-preview', description: message(language, 'command.description'), recordInput: false,
+    const offPreview = ctx.commands.register({ name: 'ja-preview', description: message(language, 'command.description'), recordInput: false,
       handler: ({ agent, rawInput, signal }) => translatePreview({ agent, llm: ctx.llm, messageId: rawInput.trim(), signal, language }) });
+    const offReplace = ctx.commands.register({ name: 'ja-replace', description: message(language, 'command.replace'), recordInput: false,
+      handler: ({ agent, rawInput, signal }) => replaceTranslation({ agent, llm: ctx.llm, messageId: rawInput.trim(), signal, language }) });
     const web = ctx.inject(['webServer', 'connection'], registerConfigApi);
-    return async () => { off(); await web.dispose(); };
+    return async () => { offPreview(); offReplace(); await web.dispose(); };
   });
 }

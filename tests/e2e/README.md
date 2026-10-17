@@ -37,6 +37,15 @@ This uses no provider, model, credentials, or external network. The screenshot i
 an actual browser capture of the local dashboard, not a mockup; it does not prove
 that DSH exposes the unavailable task/API/GPU telemetry.
 
+`node tests/e2e/artifact-preview.mjs` exercises actual report buttons and the
+authenticated project server with deferred text decoding. It checks close/reopen
+with text and image previews, close without reopening, state freshness during
+decoding, and object URL cleanup. PNGs, browser video, and observations go to
+`target/e2e/artifact-preview` (`RDSH_PREVIEW_OUTPUT` overrides this).
+Set `RDSH_PREVIEW_BASELINE_APP` to a previous `app.mjs` for real before captures
+over the same isolated backend; the regression assertions still fail on defects.
+This flow is also included in the default suite and uses no provider or Tailscale.
+
 The default command repeats native setup, native Web and project-dashboard flows
 in `en`, `zh-CN`, and `ja`, including original Japanese task/question text that
 must not be translated. Each display language also checks Japanese, Chinese and

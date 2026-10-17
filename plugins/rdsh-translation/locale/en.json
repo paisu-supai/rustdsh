@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "rdsh Japanese translation preview",
-    "description": "Show a Japanese translation while the original answer and the conversation history stay unchanged."
+    "title": "rdsh Japanese translation",
+    "description": "Show a Japanese translation of an answer, or replace the answer in the conversation history with its translation."
   }
 }

@@ -699,7 +699,7 @@ history section remains available after resolution and restart. Clients cannot
 supply or replace `attention_history`; its unclassified `blocked` snapshots are
 internal, not an accepted input kind.
 
-[#13](https://github.com/sahenjp/rustdsh/issues/13) requires actionable items with
+[#13](https://github.com/jimoto-no-llm/rustdsh/issues/13) requires actionable items with
 deadline/impact/operation sorting, same-cause grouping, and retained history after
 resolution. The priority and compatibility rules above are this implementation's
 design proposal. Producers remain the existing MCP tools and HTTP reporting API;

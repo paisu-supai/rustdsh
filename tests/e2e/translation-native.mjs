@@ -99,6 +99,15 @@ try {
   const llm = new LlmRuntime(ctx);
   const commands = new CommandRuntime(ctx);
 
+  // Load the real package-owned invariant companions. The negative control
+  // below proves they are active, so a passing replacement is evidence rather
+  // than an inert check.
+  const { InvariantRegistry } = await load('dsh-invariants');
+  new InvariantRegistry(ctx);
+  for (const [name, path] of [['dsh-session', 'lib/invariant.js'], ['dsh-compaction', 'lib/invariant.js']]) {
+    await (await import(pathToFileURL(join(modules, '@deepseek-ai', name, path)).href)).apply(ctx);
+  }
+
   // Resolve a route different from the immutable initial AgentOptions through
   // the real public waterfall. A plugin using agent.options instead of the
   // latest request/header would reach an unregistered adapter and fail.
@@ -155,6 +164,11 @@ try {
   assert.equal(before.header.config.model, CURRENT_ROUTE.model);
   assert.equal(agent.options.provider, SEED_ROUTE.provider);
   assert.equal(agent.options.model, SEED_ROUTE.model);
+  // Negative control: the loaded session invariant rejects an event that names
+  // no open turn, and the rejected append leaves the log untouched.
+  const eventsBeforeControl = agent.session.snapshotEvents().length;
+  assert.throws(() => agent.session.append('turn/end', { turn: 999, reason: { kind: 'completed' } }), /invariant/u);
+  assert.equal(agent.session.snapshotEvents().length, eventsBeforeControl);
 
   // This is the public native CommandRuntime endpoint, not the plugin handler
   // called directly. The Web Host separately resolves sessionId to this agent.
@@ -194,6 +208,40 @@ try {
   assert.deepEqual(record.errors, []);
   assert.equal(agent.status, 'idle');
 
+  // Step 2: the explicit replacement command reuses the same independent
+  // translation path and then replaces the model-visible answer in place.
+  const replaceExecution = await deadline(commands.execute(
+    agent, `/ja-replace ${answer.data.message.id}`, [], new AbortController().signal,
+  ), 'native replacement command');
+  assert.equal(replaceExecution?.result?.kind, 'success');
+  assert.equal(replaceExecution.result.text, TRANSLATED);
+  assert.equal(record.calls.length, 3, 'replacement must add exactly one independent LLM call');
+  const afterReplace = snapshot(agent.session);
+  assert.deepEqual(afterReplace.events.slice(0, after.events.length), after.events, 'replacement must only append new events');
+  const replacedEvents = afterReplace.events.slice(after.events.length);
+  assert.deepEqual(replacedEvents.map((event) => event.type), ['command/run', 'user/message', 'command/done']);
+  const replacement = replacedEvents[1];
+  assert.equal(replacement.surfaceOp.op, 'replace');
+  assert.equal(replacement.surfaceOp.startSeq, answer.seq);
+  assert.equal(replacement.surfaceOp.endSeq, answer.seq);
+  assert.deepEqual(replacement.sourceEventSeqs, [answer.seq]);
+  assert.equal(replacement.data.role, 'user');
+  assert.equal(replacement.data.source.kind, 'rdsh-translation');
+  assert.equal(replacement.data.content[0].text, TRANSLATED);
+  assert.equal(replacedEvents[0].data.name, 'ja-replace');
+  assert.equal(Object.hasOwn(replacedEvents[0].data, 'args'), false, 'recordInput:false must hold for the replacement command too');
+  assert.equal(replacedEvents[2].data.kind, 'success');
+  assert.deepEqual(afterReplace.assistant, after.assistant, 'the append-only log must keep the original assistant message');
+  assert.deepEqual(afterReplace.turns, after.turns, 'replacement must not open a new turn');
+  assert.equal(afterReplace.surface.nodes.includes(answer.seq), false, 'the replaced answer must leave the model-visible surface');
+  assert.equal(afterReplace.surface.nodes.includes(replacement.seq), true, 'the translation node must own the replaced position');
+  assert.equal(afterReplace.surface.replaceGeneration, after.surface.replaceGeneration + 1);
+  assert.equal(JSON.stringify(afterReplace.messages).includes(ORIGINAL), false, 'the next derived request must not read the English answer');
+  assert.equal(JSON.stringify(afterReplace.messages).includes(TRANSLATED), true, 'the next derived request must read the translation');
+  assert.equal(afterReplace.messages.filter((message) => message.role === 'user' && message.source?.kind === 'human').length, 1, 'replacement must not add a human request');
+  assert.deepEqual(record.errors, []);
+  assert.equal(agent.status, 'idle');
+
   console.log(JSON.stringify({
     result: 'PASS',
     scope: 'Installed DSH native contracts; local stub adapter; Web UI not covered',
@@ -202,10 +250,16 @@ try {
     route: CURRENT_ROUTE,
     originalAnswerUnchanged: true,
     assistantAndTurnEventsUnchanged: true,
-    surfaceUnchanged: true,
-    deriveMessagesUnchanged: true,
+    previewSurfaceUnchanged: true,
+    previewDeriveMessagesUnchanged: true,
     appendedEventTypes: appended.map((event) => event.type),
     commandResult: execution.result,
+    replacementEventTypes: replacedEvents.map((event) => event.type),
+    replacementSurface: { nodes: afterReplace.surface.nodes, replaceGeneration: afterReplace.surface.replaceGeneration },
+    replacementSourceKind: replacement.data.source.kind,
+    invariantCompanions: ['dsh-session', 'dsh-compaction'],
+    invariantNegativeControlRejected: true,
+    replacementCommandResult: replaceExecution.result,
     errors: record.errors,
   }, null, 2));
 } finally {

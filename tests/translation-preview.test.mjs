@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import vm from 'node:vm';
-import { apply, translatePreview, translationRoute, registerConfigApi } from '../plugins/rdsh-translation/index.js';
+import { apply, translatePreview, replaceTranslation, translationRoute, registerConfigApi } from '../plugins/rdsh-translation/index.js';
 import { protectLiterals, restoreLiterals, shouldOfferTranslation } from '../plugins/rdsh-translation/translation-core.js';
 
 const executeFile = promisify(execFile);
@@ -80,9 +80,11 @@ const textOf = (node) => !node ? '' : typeof node === 'object' ? node.children.m
 test('translation preview: button invokes the registered command and displays translation without changing the conversation', async () => {
   const { agent } = agentFixture();
   const llm = llmFixture();
-  let command;
-  const ctx = { llm, commands: { register(value) { command = value; return () => {}; } }, effect: (fn) => fn(), inject: () => ({ dispose: async () => {} }) };
+  const commands = new Map();
+  const ctx = { llm, commands: { register(value) { commands.set(value.name, value); return () => {}; } }, effect: (fn) => fn(), inject: () => ({ dispose: async () => {} }) };
   const dispose = apply(ctx);
+  const command = commands.get('ja-preview');
+  assert.deepEqual([...commands.keys()].sort(), ['ja-preview', 'ja-replace'], 'the plugin registers a display and an explicit replacement command');
   const before = JSON.stringify(agent.session.deriveMessages());
   const ui = uiHost(async (sessionId, line, attachments) => {
     assert.equal(sessionId, 'session-1'); assert.equal(line, '/ja-preview answer-1'); assert.equal(attachments.length, 0);
@@ -90,6 +92,7 @@ test('translation preview: button invokes the registered command and displays tr
   });
   ui.render(); await ui.settle();
   assert.equal(command.recordInput, false);
+  assert.equal(commands.get('ja-replace').recordInput, false);
   await button(ui.render()).props.onClick();
   assert.match(textOf(ui.render()), /回答の準備ができました/);
   assert.match(textOf(ui.render()), /原文と会話履歴は変更していません/);
@@ -243,4 +246,98 @@ test('translation preview: recommended installation includes web/desktop, exclud
     const { stdout } = await executeFile(shell, [join(root, 'plugins/install.sh')], { cwd: root, env, timeout: 10000 });
     assert.equal(stdout.includes('/plugins/rdsh-translation'), expected, profile);
   }
+});
+
+function replaceFixture(text = 'The answer is ready.') {
+  const events = [{ seq: 10, type: 'assistant/message', data: { turn: 1, step: 1, message: { id: 'answer-1', content: [{ type: 'text', text }] } } },
+    { seq: 11, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } }];
+  const surface = { nodes: [10], replaceGeneration: 0, contentGeneration: 0 };
+  const appended = [];
+  let maintenance = false;
+  const agent = { status: 'idle', options: { provider: 'initial', model: 'old' },
+    session: { snapshotEvents: () => structuredClone(events), surface, requestHeader: () => ({ config: { provider: 'current', model: 'selected' } }),
+      append(type, data, opts) { appended.push({ type, data: structuredClone(data), opts: structuredClone(opts) }); const event = { seq: events.length + 10, type, data, ...opts }; events.push(event); surface.nodes = [...surface.nodes.filter((seq) => seq !== 10), event.seq]; surface.replaceGeneration += 1; return event; },
+      deriveMessages: () => structuredClone(events.filter((event) => event.seq !== 10).map((event) => event.data)) },
+    async runMaintenance(job) { if (maintenance) throw new Error('busy'); maintenance = true; try { return await job(new AbortController().signal); } finally { maintenance = false; } } };
+  return { agent, events, surface, appended };
+}
+
+function commandHost(fixture, llm) {
+  const commands = new Map();
+  const ctx = { llm, commands: { register(value) { commands.set(value.name, value); return () => {}; } }, effect: (fn) => fn(), inject: () => ({ dispose: async () => {} }) };
+  apply(ctx);
+  return { commands, execute: async (sessionId, line, attachments) => {
+    const [name, id] = line.replace(/^\//u, '').split(' ');
+    return { ok: true, value: { result: await commands.get(name).handler({ agent: fixture.agent, rawInput: id, signal: new AbortController().signal }) } };
+  } };
+}
+
+const replaceButton = (view) => find(view, (node) => node.props['data-testid'] === 'rdsh-translate-replace');
+
+test('translation replace: the action calls ja-replace and appends one exact surface replacement', async () => {
+  const fixture = replaceFixture();
+  const llm = llmFixture();
+  const ui = uiHost(commandHost(fixture, llm).execute);
+  ui.render(); await ui.settle();
+  assert.match(textOf(replaceButton(ui.render())), /日本語訳で置き換える/);
+  await replaceButton(ui.render()).props.onClick();
+  assert.equal(fixture.appended.length, 1, 'the replace action must append exactly one event');
+  const [appended] = fixture.appended;
+  assert.equal(appended.type, 'user/message');
+  assert.equal(appended.data.role, 'user');
+  assert.deepEqual(appended.data.content, [{ type: 'text', text: '回答の準備ができました。' }]);
+  assert.equal(appended.data.source.kind, 'rdsh-translation');
+  assert.equal(typeof appended.data.id, 'string');
+  assert.deepEqual(appended.opts.surfaceOp, { op: 'replace', startSeq: 10, endSeq: 10 });
+  assert.deepEqual(appended.opts.sourceEventSeqs, [10]);
+  assert.deepEqual(fixture.surface.nodes, [12]);
+  assert.equal(JSON.stringify(fixture.agent.session.deriveMessages()).includes('The answer is ready.'), false, 'the model-visible history must no longer carry the original');
+  assert.equal(JSON.stringify(fixture.agent.session.deriveMessages()).includes('回答の準備ができました。'), true);
+  assert.match(textOf(ui.render()), /次のモデル要求/);
+  assert.match(textOf(replaceButton(ui.render())), /履歴を置き換えました/);
+  assert.equal(replaceButton(ui.render()).props.disabled, true);
+  ui.dispose();
+});
+
+test('translation replace: only an explicit click replaces history; the preview stays display-only', async () => {
+  const fixture = replaceFixture();
+  const ui = uiHost(commandHost(fixture, llmFixture()).execute);
+  ui.render(); await ui.settle();
+  const before = JSON.stringify(fixture.agent.session.deriveMessages());
+  await button(ui.render()).props.onClick();
+  assert.equal(fixture.appended.length, 0, 'the display action must never touch the session');
+  assert.match(textOf(ui.render()), /原文と会話履歴は変更していません/);
+  assert.equal(JSON.stringify(fixture.agent.session.deriveMessages()), before);
+  ui.dispose();
+});
+
+test('translation replace: busy, missing, lost literals and a rejecting session never append', async () => {
+  const cases = [];
+  const busy = replaceFixture(); busy.agent.status = 'running'; cases.push(['busy', busy, llmFixture(), /回答の生成が完了してから/]);
+  const missing = replaceFixture(); missing.events[0].data.message.id = 'other'; cases.push(['missing', missing, llmFixture(), /確認できません/]);
+  const lost = replaceFixture('Use file_name now.'); cases.push(['lost', lost, llmFixture(() => '訳文'), /コード・識別子・パス/]);
+  const refusing = replaceFixture(); refusing.agent.session.append = () => { throw new Error('session refused'); }; cases.push(['refusing', refusing, llmFixture(), /置き換えられませんでした/]);
+  for (const [name, fixture, llm, expected] of cases) {
+    const result = await replaceTranslation({ agent: fixture.agent, llm, messageId: 'answer-1' });
+    assert.equal(result.kind, 'error', name);
+    assert.match(result.text, expected, name);
+    assert.equal(fixture.appended.length, 0, name);
+  }
+});
+
+test('translation replace: an already replaced answer reports its own error instead of a silent miss', async () => {
+  const fixture = replaceFixture();
+  fixture.events.push({ seq: 12, type: 'user/message', surfaceOp: { op: 'replace', startSeq: 10, endSeq: 10 }, sourceEventSeqs: [10], data: { id: 'r1', role: 'user', content: [{ type: 'text', text: '回答の準備ができました。' }], source: { kind: 'rdsh-translation' } } });
+  fixture.surface.nodes = [12];
+  const result = await replaceTranslation({ agent: fixture.agent, llm: llmFixture(), messageId: 'answer-1' });
+  assert.equal(result.kind, 'error');
+  assert.match(result.text, /すでに日本語訳へ置き換えられています/u);
+  assert.equal(fixture.appended.length, 0);
+});
+
+test('translation replace: Japanese answers expose no replacement action', async () => {
+  const ui = uiHost(() => assert.fail('no call'), { data: chatData('これは日本語の回答です。') });
+  ui.render(); await ui.settle();
+  assert.equal(ui.render(), null);
+  ui.dispose();
 });

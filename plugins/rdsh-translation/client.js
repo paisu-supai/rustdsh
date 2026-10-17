@@ -16,6 +16,13 @@ window.__ModuleLoader__.load({
         'dialog.section': 'Japanese translation (display only)',
         'dialog.title': 'Japanese translation',
         'dialog.note': 'The original answer and the conversation history are unchanged. This translation is shown only on this screen.',
+        'dialog.replaceSection': 'Japanese translation (the answer is replaced in the conversation history)',
+        'dialog.replaceNote': 'The next model request reads this translation instead of the original answer. The original answer stays in the session log and on this screen.',
+        'action.replace': 'Replace with Japanese translation',
+        'action.replaceBusy': 'Replacing…',
+        'action.replaced': 'Replaced in history',
+        'action.replaceAria': 'Replace this answer with its Japanese translation in the conversation history',
+        'error.replace': 'The answer could not be replaced. Try again.',
         'dialog.close': 'Close',
         'error.command': 'The translation command did not run. Try again.',
         'error.result': 'No translation result was received. Try again.',
@@ -30,6 +37,13 @@ window.__ModuleLoader__.load({
         'dialog.section': '日文翻译（仅显示）',
         'dialog.title': '日文翻译',
         'dialog.note': '原文与会话历史均未更改。译文仅在此画面显示。',
+        'dialog.replaceSection': '日文翻译（已在会话历史中替换回答）',
+        'dialog.replaceNote': '下次模型请求将读取此译文而非原文。原文仍保留在会话日志和本画面中。',
+        'action.replace': '用日文翻译替换',
+        'action.replaceBusy': '替换中…',
+        'action.replaced': '已替换历史',
+        'action.replaceAria': '在会话历史中用日文翻译替换此回答',
+        'error.replace': '无法替换回答。请重试。',
         'dialog.close': '关闭',
         'error.command': '无法执行翻译命令。请重试。',
         'error.result': '未能收到翻译结果。请重试。',
@@ -44,6 +58,13 @@ window.__ModuleLoader__.load({
         'dialog.section': '日本語訳（表示のみ）',
         'dialog.title': '日本語訳',
         'dialog.note': '原文と会話履歴は変更していません。訳文はこの画面でのみ表示します。',
+        'dialog.replaceSection': '日本語訳（会話履歴の回答を置換済み）',
+        'dialog.replaceNote': '次のモデル要求は元の回答ではなくこの訳文を読みます。元の回答は会話ログとこの画面に残ります。',
+        'action.replace': '日本語訳で置き換える',
+        'action.replaceBusy': '置き換えています…',
+        'action.replaced': '履歴を置き換えました',
+        'action.replaceAria': 'この回答を日本語訳で会話履歴上に置き換える',
+        'error.replace': '回答を置き換えられませんでした。再試行してください',
         'dialog.close': '閉じる',
         'error.command': '和訳コマンドを実行できませんでした。再試行してください',
         'error.result': '和訳結果を受け取れませんでした。再試行してください',
@@ -79,6 +100,8 @@ window.__ModuleLoader__.load({
       const data = props.useChat((snapshot) => [...snapshot.nodes.values()].find((node) => node.kind === 'assistant-step' && node.data?.finalNode?.messageId === props.messageId)?.data);
       const [limit, setLimit] = React.useState(null);
       const [state, setState] = React.useState(null);
+      // 置換済みの回答id。画面の再読込では失われるが、モデル履歴の置換は残る。
+      const [replaced, setReplaced] = React.useState(null);
       const preview = React.useRef(null);
       const active = React.useRef({ messageId: props.messageId, pending: null });
       if (active.current.messageId !== props.messageId) active.current = { messageId: props.messageId, pending: null };
@@ -88,29 +111,35 @@ window.__ModuleLoader__.load({
       }, [state, props.messageId]);
       if (limit === null || !eligible(data, props.messageId, limit)) return null;
       const view = state?.messageId === props.messageId ? state : null;
-      const run = async () => {
+      const isReplaced = replaced === props.messageId;
+      const run = async (mode) => {
         if (active.current.pending) return;
-        const request = { messageId: props.messageId };
+        const request = { messageId: props.messageId, mode };
         active.current.pending = request;
-        setState({ messageId: props.messageId, busy: true });
+        setState({ messageId: props.messageId, busy: mode });
         const settle = (value) => { if (active.current.pending === request && active.current.messageId === request.messageId) setState({ messageId: request.messageId, ...value }); };
+        const replacing = mode === 'replace';
         try {
-          const response = await props.execute(request.messageId);
-          if (!response?.ok) throw new Error(t('error.command'));
+          const response = await (replacing ? props.replace(request.messageId) : props.execute(request.messageId));
+          if (!response?.ok) throw new Error(t(replacing ? 'error.replace' : 'error.command'));
           const result = response.value?.result;
           if (result?.kind !== 'success' || typeof result.text !== 'string' || !result.text.trim()) {
-            settle({ error: result?.kind === 'error' && typeof result.text === 'string' ? result.text : t('error.result') });
-          } else settle({ text: result.text });
-        } catch { settle({ error: t('error.command') }); }
+            settle({ error: result?.kind === 'error' && typeof result.text === 'string' ? result.text : t(replacing ? 'error.replace' : 'error.result') });
+          } else {
+            if (replacing) setReplaced(request.messageId);
+            settle({ text: result.text, replaced: replacing });
+          }
+        } catch { settle({ error: t(replacing ? 'error.replace' : 'error.command') }); }
         finally { if (active.current.pending === request) active.current.pending = null; }
       };
       return h('div', { className: 'rdsh-translation-preview', style: { maxWidth: '100%', minWidth: 0 } },
-        h('button', { type: 'button', disabled: Boolean(view?.busy), onClick: run, 'aria-label': t('action.aria'), 'data-testid': 'rdsh-translate-action', style: { cursor: view?.busy ? 'wait' : 'pointer', font: 'inherit' } }, view?.busy ? t('action.busy') : view?.text ? t('action.again') : t('action.show')),
+        h('button', { type: 'button', disabled: Boolean(view?.busy), onClick: () => run('preview'), 'aria-label': t('action.aria'), 'data-testid': 'rdsh-translate-action', style: { cursor: view?.busy ? 'wait' : 'pointer', font: 'inherit' } }, view?.busy === 'preview' ? t('action.busy') : view?.text ? t('action.again') : t('action.show')),
+        h('button', { type: 'button', disabled: Boolean(view?.busy) || isReplaced, onClick: () => run('replace'), 'aria-label': t('action.replaceAria'), 'data-testid': 'rdsh-translate-replace', style: { cursor: view?.busy ? 'wait' : 'pointer', font: 'inherit' } }, isReplaced ? t('action.replaced') : view?.busy === 'replace' ? t('action.replaceBusy') : t('action.replace')),
         view?.busy ? h('span', { role: 'status', 'aria-live': 'polite' }, ' ' + t('status.translating')) : null,
         view?.text || view?.error ? h('dialog', { ref: preview, 'aria-label': t('dialog.aria'), style: { width: 'min(42rem, calc(100vw - 3rem))', maxHeight: '80vh', overflow: 'auto', boxSizing: 'border-box', padding: 16, border: '1px solid currentColor', borderRadius: 8, font: 'inherit' } },
           h('button', { type: 'button', onClick: () => preview.current?.close(), style: { float: 'right', font: 'inherit' } }, t('dialog.close')),
-          view.error ? h('p', { role: 'alert' }, view.error) : h('section', { 'aria-label': t('dialog.section') },
-            h('strong', null, t('dialog.title')), h('p', { style: { fontSize: '0.85em' } }, t('dialog.note')),
+          view.error ? h('p', { role: 'alert' }, view.error) : h('section', { 'aria-label': view.replaced ? t('dialog.replaceSection') : t('dialog.section') },
+            h('strong', null, t('dialog.title')), h('p', { style: { fontSize: '0.85em' } }, view.replaced ? t('dialog.replaceNote') : t('dialog.note')),
             h('pre', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', font: 'inherit', marginBottom: 0 } }, view.text))) : null);
     }
     return { inject: ['slots', 'remote', 'remote.commands', 'locale'], apply(ctx) {
@@ -120,7 +149,10 @@ window.__ModuleLoader__.load({
       }
       ctx.slots.inject('conversation.chat.assistant-actions', () => ctx.slots.register({ name: 'conversation.chat.assistant-actions', id: 'rdsh-translation-preview', order: 35,
         ...localized ? { locale: NAMESPACE } : {},
-        inject: (sessionId) => ({ execute: (messageId) => ctx.remote.commands.execute(sessionId, `/ja-preview ${messageId}`, []) }) }, TranslateAction));
+        inject: (sessionId) => ({
+          execute: (messageId) => ctx.remote.commands.execute(sessionId, '/ja-preview ' + messageId, []),
+          replace: (messageId) => ctx.remote.commands.execute(sessionId, '/ja-replace ' + messageId, []),
+        }) }, TranslateAction));
     } };
   },
 });
