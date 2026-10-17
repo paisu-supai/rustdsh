@@ -1,0 +1,129 @@
+name: runtime-json-evidence
+
+on:
+  push:
+    branches: [verify/runtime-ci]
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    if: github.repository == 'paisu-supai/rustdsh'
+    runs-on: windows-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      BASE: 3ce1ad8e676d8068624faefeb0fd6d67f3c6b6b6
+      CANDIDATE: eb3baf8a24a1ac185d45cd926d84b02375572024
+      HELPER: ba0be3a67edd7855aab4453e030e178a824feac8
+      HELPER_BLOB: 4f72bfbc9d6525f5dc3eee5ab7a7b4de90424927
+      GIT_CONFIG_COUNT: '3'
+      GIT_CONFIG_KEY_0: fetch.prune
+      GIT_CONFIG_VALUE_0: 'false'
+      GIT_CONFIG_KEY_1: remote.origin.prune
+      GIT_CONFIG_VALUE_1: 'false'
+      GIT_CONFIG_KEY_2: remote.upstream.prune
+      GIT_CONFIG_VALUE_2: 'false'
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+    steps:
+      - name: Require a fresh runner checkout with no preexisting refs
+        run: |
+          if (Test-Path -LiteralPath .git) { throw 'Preserve preexisting repository' }
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Fetch fixed objects without pruning; retain complete immutable worktrees
+        run: |
+          $refs = @(git for-each-ref --format='%(refname)')
+          foreach ($sha in @($env:BASE, $env:CANDIDATE, $env:HELPER)) {
+            git fetch --no-prune --no-tags --depth=1 https://github.com/paisu-supai/rustdsh.git $sha
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          $after = @(git for-each-ref --format='%(refname)')
+          if (@($refs | Where-Object { $_ -notin $after }).Count) { throw 'Ref deletion' }
+          $before = Join-Path $env:RUNNER_TEMP 'runtime-before'
+          $candidate = Join-Path $env:RUNNER_TEMP 'runtime-candidate'
+          foreach ($p in @($before, $candidate)) {
+            if (Test-Path -LiteralPath $p) { throw 'Preserve existing path' }
+          }
+          git worktree add --detach $before $env:BASE
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git worktree add --detach $candidate $env:CANDIDATE
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $allowed = @('dashboard/runtime-json-rename.mjs','dashboard/server.mjs','dashboard/state.mjs','dashboard/test/runtime-json-rename.test.mjs','dashboard/test/runtime-json-rotation.test.mjs','docs/MCP-CLIENTS.md')
+          $changed = @(git diff --name-only $env:BASE $env:CANDIDATE)
+          if ($changed.Count -ne 6 -or @($changed | Where-Object { $_ -notin $allowed }).Count) { throw 'Candidate scope changed' }
+          git diff --exit-code $env:BASE $env:CANDIDATE -- Cargo.toml Cargo.lock src assets dashboard/package.json dashboard/package-lock.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "BEFORE_ROOT=$before" >> $env:GITHUB_ENV
+          "CANDIDATE_ROOT=$candidate" >> $env:GITHUB_ENV
+          New-Item -ItemType Directory evidence | Out-Null
+          @{ scope='runtime JSON only; both fixed heads already contain the native catalog; legacy/qualified are reused helper role names, not a catalog speedup claim'; base=$env:BASE; candidate=$env:CANDIDATE; helper=$env:HELPER; helperBlob=$env:HELPER_BLOB; checkout=(git rev-parse HEAD); refDeletions=0 } | ConvertTo-Json | Set-Content -Encoding utf8 evidence/identity.json
+      - name: Extract and byte-verify the unchanged existing measurement helper
+        run: |
+          $env:RUNTIME_HELPER_FILE = Join-Path $env:RUNNER_TEMP 'runtime-helper.py'
+          if (Test-Path -LiteralPath $env:RUNTIME_HELPER_FILE) { throw 'Preserve existing helper' }
+          cmd /d /c 'git show %HELPER%:scripts/adapter-catalog-evidence.py > "%RUNTIME_HELPER_FILE%"'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ((git hash-object $env:RUNTIME_HELPER_FILE) -ne $env:HELPER_BLOB) { throw 'Frozen helper changed' }
+          "RUNTIME_HELPER_FILE=$env:RUNTIME_HELPER_FILE" >> $env:GITHUB_ENV
+          python $env:RUNTIME_HELPER_FILE --self-check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install each complete declared SDK graph on the hosted runner only
+        run: |
+          npm ci --prefix "$env:BEFORE_ROOT/dashboard"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm ci --prefix "$env:CANDIDATE_ROOT/dashboard"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($p in @($env:BEFORE_ROOT, $env:CANDIDATE_ROOT)) {
+            git -C $p diff --exit-code HEAD
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Build the unchanged actual native companion
+        run: |
+          cargo build --release --locked --manifest-path "$env:CANDIDATE_ROOT/Cargo.toml" --bin rdsh
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "RDSH_BIN=$env:CARGO_TARGET_DIR/release/rdsh.exe" >> $env:GITHUB_ENV
+          node --version > evidence/toolchain.txt
+          npm --version >> evidence/toolchain.txt
+          rustc --version >> evidence/toolchain.txt
+          python --version >> evidence/toolchain.txt
+      - name: Measure paired real startup, primary RSS and public HTTP with unchanged gates
+        run: |
+          python $env:RUNTIME_HELPER_FILE --root $env:CANDIDATE_ROOT --native $env:RDSH_BIN --baseline $env:BASE --baseline-root $env:BEFORE_ROOT --samples 7 > evidence/server-cli.json 2> evidence/server-cli.stderr.log
+          $code = $LASTEXITCODE
+          $status = @{ nativeExitCode=$code; completeReport=$false; limitation='The frozen helper emits its combined report only at completion; an earlier failure cannot preserve partial samples or deleted fixture streams. Stderr and this status remain evidence, never a performance pass.' }
+          if ($code -eq 0) {
+            try {
+              $data = [IO.File]::ReadAllText((Join-Path $PWD 'evidence/server-cli.json')) | ConvertFrom-Json
+              if ($data.checkout -ne $env:CANDIDATE -or $data.base -ne $env:BASE -or $data.node -notlike 'v22.*' -or $data.platform -ne 'win32' -or !$data.allOutputsByteExact) { throw 'Measurement identity mismatch' }
+              if ($data.server.regressions.Count -ne 0 -or $data.server.alternatingSamplesPerMode -ne 7 -or $data.server.samples.legacyNodeServer.Count -ne 7 -or $data.server.samples.qualifiedNodeServer.Count -ne 7) { throw 'Incomplete or regressed server comparison' }
+              $status.completeReport = $true
+            } catch {
+              $status.validationError = $_.ToString()
+              $code = 1
+            }
+          }
+          $status.verificationExitCode = $code
+          $status | ConvertTo-Json | Set-Content -Encoding utf8 evidence/server-status.json
+          exit $code
+      - name: Record paired IO including residual bounded-retry failures
+        if: always() && env.CANDIDATE_ROOT != ''
+        run: |
+          node .github/scripts/runtime-json-io.mjs "$env:BEFORE_ROOT" "$env:CANDIDATE_ROOT" evidence/io.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: windows-runtime-evidence
+          path: evidence/
+          if-no-files-found: error
