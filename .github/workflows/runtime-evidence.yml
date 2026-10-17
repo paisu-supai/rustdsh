@@ -17,7 +17,7 @@ jobs:
         shell: pwsh
     env:
       BASE: 3ce1ad8e676d8068624faefeb0fd6d67f3c6b6b6
-      CANDIDATE: eb3baf8a24a1ac185d45cd926d84b02375572024
+      CANDIDATE: 51be53b43a91bac0e7fc59c360e9a29cb3d95aef
       HELPER: ba0be3a67edd7855aab4453e030e178a824feac8
       HELPER_BLOB: 4f72bfbc9d6525f5dc3eee5ab7a7b4de90424927
       GIT_CONFIG_COUNT: '3'
@@ -127,6 +127,19 @@ jobs:
         if: success() && env.CANDIDATE_ROOT != '' && steps.fixtures.outcome == 'success'
         run: |
           node .github/scripts/runtime-json-io.mjs "$env:BEFORE_ROOT" "$env:CANDIDATE_ROOT" evidence/io.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Record untraced same-workload single-writer control with readers through final publication
+        if: success() && env.CANDIDATE_ROOT != '' && steps.fixtures.outcome == 'success'
+        run: |
+          node .github/scripts/runtime-json-overlap.mjs "$env:BEFORE_ROOT" "$env:CANDIDATE_ROOT" evidence/overlap-control.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Attribute separate instrumented single-writer tails with native FS events
+        if: success() && env.CANDIDATE_ROOT != '' && steps.fixtures.outcome == 'success'
+        run: |
+          New-Item -ItemType Directory -Path evidence/tail-traces -ErrorAction Stop | Out-Null
+          node --trace-event-categories=node.fs.async '--trace-event-file-pattern=evidence/tail-traces/native-${pid}-${rotation}.json' .github/scripts/runtime-json-overlap.mjs "$env:BEFORE_ROOT" "$env:CANDIDATE_ROOT" evidence/overlap-traced.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node .github/scripts/runtime-json-trace-analysis.mjs evidence/overlap-traced.json evidence/tail-traces evidence/overlap-analysis.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v7
         if: always()
